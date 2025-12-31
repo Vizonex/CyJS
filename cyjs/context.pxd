@@ -36,13 +36,13 @@ cdef class Context:
 
  
     # These can be accessed from other external projects so I've fully exposed them under the JS Prefix...
-    # cdef inline JSValue js_eval(
-    #     self, 
-    #     const char *input, 
-    #     size_t input_len, 
-    #     const char *filename, 
-    #     int eval_flags
-    # ):
+    cdef inline JSValue js_eval(
+        self, 
+        const char *input, 
+        size_t input_len, 
+        const char *filename, 
+        int eval_flags
+    )
     #     return JS_Eval(self.context, input, input_len, filename, eval_flags)
     
     # cdef inline JSValue js_eval2(
@@ -69,6 +69,14 @@ cdef class Context:
     #         filename, 
     #         eval_flags
     #     )
+
+    # cdef JSValue js_eval_this_2(
+    #     self, 
+    #     JSValue this_obj, 
+    #     const char *input, 
+    #     size_t input_len, 
+    #     JSEvalOptions *options
+    # )
 
     # cdef inline JSValue js_eval_this_2(
     #     self, 

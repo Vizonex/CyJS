@@ -53,8 +53,21 @@ cdef class Value:
         buffer.suboffsets = NULL
         
     def __releasebuffer__(self, Py_buffer *buffer):
-        JS_FreeCString(self.ctx.context, buffer.buf)
+        JS_FreeCString(self.ctx.context, <const char*>buffer.buf)
     
+    cpdef bytes to_json(self):
+        """
+        Useful when debugging or handling unknown js to py conversions
+        NOTE: for best results, using third party libraries like orjson 
+        or msgspec is advised. 
+        """
+        cdef JSValue v = JS_JSONStringify(self.ctx.context, self.value, JS_UNDEFINED, JS_UNDEFINED)
+        cdef size_t size
+        cdef const char* data = JS_ToCStringLen(self.ctx.context, &size, self.value)
+        cdef bytes ret = PyBytes_FromStringAndSize(data, size)
+        JS_FreeCString(self.ctx.context, data)
+        return ret
+
 
 
 
@@ -82,7 +95,7 @@ cdef class Atom:
         cdef JSAtom atom
 
         if isinstance(key, Value):
-            atom = JS_ValueToAtom(ctx.context, key.value)
+            atom = JS_ValueToAtom(ctx.context, (<Value>key).value)
 
         elif isinstance(key, int):
             atom = JS_NewAtomUInt32(ctx.context, <uint32_t>key)
@@ -120,286 +133,287 @@ cdef class Atom:
         buffer.suboffsets = NULL
         
     def __releasebuffer__(self, Py_buffer *buffer):
-        JS_FreeCString(self.ctx, buffer.buf)
+        JS_FreeCString(self.ctx.context, <const char*>buffer.buf)
 
-
-
-cdef Atom to_atom(Context ctx, object obj):
-    if isinstance(obj, Atom):
-        return <Atom>obj
-    return Atom.from_python(ctx, obj)
-
-# wraps JSValue as Cython/Python object
-cdef object to_py(Context ctx, JSValue val):
-    cdef int tag = JS_VALUE_GET_TAG(value)
-    cdef object return_value
-    if tag == JS_TAG_INT:
-        return_value = <object>val.u.int32
-        JS_FreeValue(ctx.context, val)
-        return return_value
-    if tag == JS_TAG_BIG_INT:
-        return BigInt.from_value(ctx, value)
-    
-    if tag == JS_TAG_BOOL:
-        return_value = PyBool_FromLong(val.u.int32)
-        JS_FreeValue(ctx.context, val)
-        return return_value
-    
-    if tag == JS_TAG_NULL or tag == JS_TAG_UNDEFINED:
-        JS_FreeValue(ctx.context, val)
-        return None
-    
-    if tag == JS_TAG_EXCEPTION:
-        ctx.raise_existing_exception(val)
-        JS_FreeValue(ctx.context, val)
-        raise
-    
-    if tag == JS_TAG_OBJECT or tag == JS_TAG_MODULE or tag == JS_TAG_SYMBOL:
-        return Object.from_value(ctx, val)
-    else:
-        # Fallback and obtain as a buffer instead if needed...
-        return Value.from_value(ctx, val)
-        # JS_FreeValue(ctx.context, val)
-        # raise TypeError("Unkown quickjs tag %i" % tag)
     
 
 
-cpdef object from_json(Context ctx, object data):
-    cdef Py_buffer view
-    cdef object obj
-    cdef JSValue v 
-    if cyjs_get_buffer(data, &view) < 0:
-        raise
+# cdef Atom to_atom(Context ctx, object obj):
+#     if isinstance(obj, Atom):
+#         return <Atom>obj
+#     return Atom.from_python(ctx, obj)
 
-    v = JS_ParseJSON(ctx.context, view.buf, view.len)
-    cyjs_release_buffer(&view)
+# # wraps JSValue as Cython/Python object
+# cdef object to_py(Context ctx, JSValue val):
+#     cdef int tag = JS_VALUE_GET_TAG(value)
+#     cdef object return_value
+#     if tag == JS_TAG_INT:
+#         return_value = <object>val.u.int32
+#         JS_FreeValue(ctx.context, val)
+#         return return_value
+#     if tag == JS_TAG_BIG_INT:
+#         return BigInt.from_value(ctx, value)
     
-    # Handle exceptions here...
-    return to_py(v)
-
-
-
-
-
-
-
-# Private
-cdef class NODEFAULT:
-    pass
-
-
-# ctypedef fused bigint_t:
-#     int64_t
-#     uint64_t
-
-
-
-cdef class BigInt(Value):
-    @staticmethod
-    cdef BigInt from_value(Context ctx, JSValue value):
-        cdef BigInt self = BigInt.__new__(BigInt)
-        self.ctx = ctx
-        self.value = value
-        self.tag = JS_VALUE_GET_TAG(value)
-        return self
-
-    def __init__(self, Context ctx, object value) -> None:
-        super().__init__()
-        cdef JSValue v
-        if value > LLONG_MAX:
-            v = JS_NewBigUint64(ctx.context, value)
-        else:
-            v = JS_NewBigInt64(ctx.context, value)
-        if ctx.handle_exception(v) < 0:
-            raise
-        self.value = value
+#     if tag == JS_TAG_BOOL:
+#         return_value = PyBool_FromLong(val.u.int32)
+#         JS_FreeValue(ctx.context, val)
+#         return return_value
+    
+#     if tag == JS_TAG_NULL or tag == JS_TAG_UNDEFINED:
+#         JS_FreeValue(ctx.context, val)
+#         return None
+    
+#     if tag == JS_TAG_EXCEPTION:
+#         ctx.raise_existing_exception(val)
+#         JS_FreeValue(ctx.context, val)
+#         raise
+    
+#     if tag == JS_TAG_OBJECT or tag == JS_TAG_MODULE or tag == JS_TAG_SYMBOL:
+#         return Object.from_value(ctx, val)
+#     else:
+#         # Fallback and obtain as a buffer instead if needed...
+#         return Value.from_value(ctx, val)
+#         # JS_FreeValue(ctx.context, val)
+#         # raise TypeError("Unkown quickjs tag %i" % tag)
     
 
-    cpdef object to_int64(self):
-        cdef int64_t i64 = 0
+
+# cpdef object from_json(Context ctx, object data):
+#     cdef Py_buffer view
+#     cdef object obj
+#     cdef JSValue v 
+#     if cyjs_get_buffer(data, &view) < 0:
+#         raise
+
+#     v = JS_ParseJSON(ctx.context, view.buf, view.len)
+#     cyjs_release_buffer(&view)
+    
+#     # Handle exceptions here...
+#     return to_py(v)
+
+
+
+
+
+
+
+# # Private
+# cdef class NODEFAULT:
+#     pass
+
+
+# # ctypedef fused bigint_t:
+# #     int64_t
+# #     uint64_t
+
+
+
+# cdef class BigInt(Value):
+#     @staticmethod
+#     cdef BigInt from_value(Context ctx, JSValue value):
+#         cdef BigInt self = BigInt.__new__(BigInt)
+#         self.ctx = ctx
+#         self.value = value
+#         self.tag = JS_VALUE_GET_TAG(value)
+#         return self
+
+#     def __init__(self, Context ctx, object value) -> None:
+#         super().__init__()
+#         cdef JSValue v
+#         if value > LLONG_MAX:
+#             v = JS_NewBigUint64(ctx.context, value)
+#         else:
+#             v = JS_NewBigInt64(ctx.context, value)
+#         if ctx.handle_exception(v) < 0:
+#             raise
+#         self.value = value
+    
+
+#     cpdef object to_int64(self):
+#         cdef int64_t i64 = 0
         
-        if JS_ToBigInt64(self.ctx.context, &i64, self.value) < 0:
-            raise TypeError("unable to convert BigInt to int64_t")
-        return i64
+#         if JS_ToBigInt64(self.ctx.context, &i64, self.value) < 0:
+#             raise TypeError("unable to convert BigInt to int64_t")
+#         return i64
 
-    cpdef object to_uint64(self):
-        cdef uint64_t i64 = 0
+#     cpdef object to_uint64(self):
+#         cdef uint64_t i64 = 0
         
-        if JS_ToBigUint64(self.ctx.context, &i64, self.value) < 0:
-            raise TypeError("unable to convert BigInt to uint64_t")
-        return i64
+#         if JS_ToBigUint64(self.ctx.context, &i64, self.value) < 0:
+#             raise TypeError("unable to convert BigInt to uint64_t")
+#         return i64
     
 
-cdef class Object(Value):
-    @classmethod
-    cdef Object from_value(cls, Context ctx, JSValue value):
-        cdef Object self = <Object>cls.__new__(cls)
-        self.ctx = ctx
-        self.value = value
-        self.tag = JS_VALUE_GET_TAG(value)
-        return self
+# cdef class Object(Value):
+#     @classmethod
+#     cdef Object from_value(cls, Context ctx, JSValue value):
+#         cdef Object self = <Object>cls.__new__(cls)
+#         self.ctx = ctx
+#         self.value = value
+#         self.tag = JS_VALUE_GET_TAG(value)
+#         return self
 
-    @classmethod
-    cdef Object new(cls, Context ctx):
-        cdef JSValue v = JS_NewObject(ctx.context)
-        if ctx.handle_exception(v) < 0:
-            raise
-        return cls.from_value(ctx, v)
+#     @classmethod
+#     cdef Object new(cls, Context ctx):
+#         cdef JSValue v = JS_NewObject(ctx.context)
+#         if ctx.handle_exception(v) < 0:
+#             raise
+#         return cls.from_value(ctx, v)
 
-    cpdef bytes to_json(self):
-        """
-        Useful when debugging or handling unknown js to py conversions
-        NOTE: for best results, using third party libraries like orjson 
-        or msgspec is advised. 
-        """
-        cdef JSValue v = JS_JSONStringify(self.ctx.context, self.value, JS_UNDEFINED, JS_UNDEFINED)
-        cdef size_t size
-        cdef const char* data = JS_ToCStringLen(self.ctx.context, &size, self.value)
-        cdef bytes ret = PyBytes_FromStringAndSize(data, size)
-        JS_FreeCString(self.ctx.context, data)
-        return ret
-
-
+#     cpdef bytes to_json(self):
+#         """
+#         Useful when debugging or handling unknown js to py conversions
+#         NOTE: for best results, using third party libraries like orjson 
+#         or msgspec is advised. 
+#         """
+#         cdef JSValue v = JS_JSONStringify(self.ctx.context, self.value, JS_UNDEFINED, JS_UNDEFINED)
+#         cdef size_t size
+#         cdef const char* data = JS_ToCStringLen(self.ctx.context, &size, self.value)
+#         cdef bytes ret = PyBytes_FromStringAndSize(data, size)
+#         JS_FreeCString(self.ctx.context, data)
+#         return ret
 
 
 
 
-cdef class Function(Object):
-    @staticmethod
-    cdef Function from_value(Context ctx, JSValue value):
-        cdef Function self = Function.__new__(Function)
-        self.ctx = ctx
-        self.value = value
-        self.tag = JS_VALUE_GET_TAG(value)
-        return self
+
+
+# cdef class Function(Object):
+#     @staticmethod
+#     cdef Function from_value(Context ctx, JSValue value):
+#         cdef Function self = Function.__new__(Function)
+#         self.ctx = ctx
+#         self.value = value
+#         self.tag = JS_VALUE_GET_TAG(value)
+#         return self
 
 
 
     
 
-    # A look at JS_GetPropertyStr can give us a glimpse about how to apporch this
-    # cpdef object get(self, object key, object default = NODEFAULT):
-    #     cdef Atom atom = to_atom(self.ctx, key)
-    #     cdef Value val
-    #     cdef JSValue js_val
+#     # A look at JS_GetPropertyStr can give us a glimpse about how to apporch this
+#     # cpdef object get(self, object key, object default = NODEFAULT):
+#     #     cdef Atom atom = to_atom(self.ctx, key)
+#     #     cdef Value val
+#     #     cdef JSValue js_val
 
-    #     JS_GetProperty(self.ctx.context, )
+#     #     JS_GetProperty(self.ctx.context, )
 
-cdef class CancelledError(Exception):
-    """Promise was rejected"""
+# cdef class CancelledError(Exception):
+#     """Promise was rejected"""
 
-cdef class InvalidStateError(Exception):
-    """Promise on inavlid state"""
+# cdef class InvalidStateError(Exception):
+#     """Promise on inavlid state"""
 
-# Made to resemble Concurrent.futures.Future and asyncio.Future
+# # Made to resemble Concurrent.futures.Future and asyncio.Future
 
-cdef class Promise(Object):
-    """A Javascript Equivilent to asyncio.Future that has simillar functionality to one."""
+# cdef class Promise(Object):
+#     """A Javascript Equivilent to asyncio.Future that has simillar functionality to one."""
 
-    cdef:
-        list _callbacks
-        object _exception
-        object _result
+#     cdef:
+#         list _callbacks
+#         object _exception
+#         object _result
 
-    @staticmethod
-    cdef Promise from_value(Context ctx, JSValue value):
-        cdef Promise self = Promise.__new__(Object)
-        self.ctx = ctx
-        self.value = value
-        self.tag = JS_VALUE_GET_TAG(value)
+#     @staticmethod
+#     cdef Promise from_value(Context ctx, JSValue value):
+#         cdef Promise self = Promise.__new__(Object)
+#         self.ctx = ctx
+#         self.value = value
+#         self.tag = JS_VALUE_GET_TAG(value)
 
-        self._callbacks = []
-        self._exception = None
-        # _result can be None
-        self._result = NODEFAULT
-        return self
+#         self._callbacks = []
+#         self._exception = None
+#         # _result can be None
+#         self._result = NODEFAULT
+#         return self
 
-    cdef JSPromiseStateEnum c_state(self) except JS_PROMISE_NOT_A_PROMISE:
-        cdef JSPromiseStateEnum state = JS_PromiseState(self.ctx.context)
-        if state == JS_PROMISE_NOT_A_PROMISE:
-            PyErr_SetObject(TypeError, f"{self.__class__.__name__!r} not a promise!")
-            return JS_PROMISE_NOT_A_PROMISE
-        return state
+#     cdef JSPromiseStateEnum c_state(self) except JS_PROMISE_NOT_A_PROMISE:
+#         cdef JSPromiseStateEnum state = JS_PromiseState(self.ctx.context)
+#         if state == JS_PROMISE_NOT_A_PROMISE:
+#             PyErr_SetObject(TypeError, f"{self.__class__.__name__!r} not a promise!")
+#             return JS_PROMISE_NOT_A_PROMISE
+#         return state
     
-    cpdef object add_done_callback(self, object fn):
-        """Attaches a callable callback when promise finishes or raises an exception"""
-        if self.c_state() == JS_PROMISE_PENDING:
-            self._callbacks.append(fn)
-        else:
-            fn(self)
+#     cpdef object add_done_callback(self, object fn):
+#         """Attaches a callable callback when promise finishes or raises an exception"""
+#         if self.c_state() == JS_PROMISE_PENDING:
+#             self._callbacks.append(fn)
+#         else:
+#             fn(self)
     
-    cdef object __get_result(self):
-        if self._exception:
-            try:
-                raise self._exception
-            finally:
-                # Break a reference cycle with the exception in self._exception
-                self = None
-        else:
-            return self._result
+#     cdef object __get_result(self):
+#         if self._exception:
+#             try:
+#                 raise self._exception
+#             finally:
+#                 # Break a reference cycle with the exception in self._exception
+#                 self = None
+#         else:
+#             return self._result
 
-    cpdef object exception(self):
-        cdef JSPromiseStateEnum state = self.c_state()
-        if state == JS_PROMISE_REJECTED:
-            raise CancelledError()
-        elif state == JS_PROMISE_PENDING:
-            raise InvalidStateError('Result is not ready.')
-        return self._exception
+#     cpdef object exception(self):
+#         cdef JSPromiseStateEnum state = self.c_state()
+#         if state == JS_PROMISE_REJECTED:
+#             raise CancelledError()
+#         elif state == JS_PROMISE_PENDING:
+#             raise InvalidStateError('Result is not ready.')
+#         return self._exception
     
-    cpdef bint done(self):
-        return JS_PromiseState(self.ctx.context) == JS_PROMISE_FULFILLED
+#     cpdef bint done(self):
+#         return JS_PromiseState(self.ctx.context) == JS_PROMISE_FULFILLED
 
-    cpdef Py_ssize_t remove_done_callback(self, object fn):
-        """Remove all instances of a callback from the "call when done" list.
+#     cpdef Py_ssize_t remove_done_callback(self, object fn):
+#         """Remove all instances of a callback from the "call when done" list.
 
-        Returns the number of callbacks removed.
-        """
-        cdef Py_ssize_t removed_count
-        cdef list filtered_callbacks = [(f, ctx)
-                              for (f, ctx) in self._callbacks
-                              if f != fn]
-        removed_count = <Py_ssize_t>(len(self._callbacks) - len(filtered_callbacks))
-        if removed_count:
-            self._callbacks[:] = filtered_callbacks
-        return removed_count
+#         Returns the number of callbacks removed.
+#         """
+#         cdef Py_ssize_t removed_count
+#         cdef list filtered_callbacks = [(f, ctx)
+#                               for (f, ctx) in self._callbacks
+#                               if f != fn]
+#         removed_count = <Py_ssize_t>(len(self._callbacks) - len(filtered_callbacks))
+#         if removed_count:
+#             self._callbacks[:] = filtered_callbacks
+#         return removed_count
 
-    cpdef object result(self):
-        cdef JSPromiseStateEnum state = self.c_state()
-        if state == JS_PROMISE_REJECTED:
-            raise CancelledError()
-        if state == JS_PROMISE_FULFILLED:
-            if self._exception is not None:
-                raise self._exception
-            return to_py(self.ctx, JS_PromiseResult(self.ctx.context, self.value))
-        else:
-            raise InvalidStateError('Result is not ready.')
+#     cpdef object result(self):
+#         cdef JSPromiseStateEnum state = self.c_state()
+#         if state == JS_PROMISE_REJECTED:
+#             raise CancelledError()
+#         if state == JS_PROMISE_FULFILLED:
+#             if self._exception is not None:
+#                 raise self._exception
+#             return to_py(self.ctx, JS_PromiseResult(self.ctx.context, self.value))
+#         else:
+#             raise InvalidStateError('Result is not ready.')
 
-    # Does a single eventloop cycle to see if the promise is ready
-    # if ready it returns True otherwise False, raises exception if one was raised
-    cpdef object poll(self):
-        cdef int ret
-        cdef JSValue v
-        if self.done():
-            return True
-        if JS_IsJobPending(self.ctx.runtime.rt):
-            if JS_ExecutePendingJob(self.ctx.runtime.rt, &self.ctx.context) < 0:
-                self.ctx.raise_exception()
-                raise
+#     # Does a single eventloop cycle to see if the promise is ready
+#     # if ready it returns True otherwise False, raises exception if one was raised
+#     cpdef object poll(self):
+#         cdef int ret
+#         cdef JSValue v
+#         if self.done():
+#             return True
+#         if JS_IsJobPending(self.ctx.runtime.rt):
+#             if JS_ExecutePendingJob(self.ctx.runtime.rt, &self.ctx.context) < 0:
+#                 self.ctx.raise_exception()
+#                 raise
 
-        if self.done():
-            # promise finished so lets see if that result was an exception or not
-            v = JS_PromiseResult(self.ctx.context, self.value)
-            if JS_IsException(v):
-                self._exception = self.ctx.get_raised_exception()
-            else:
-                self._result = to_py(self.ctx, v)
-            # Run all callbacks at this point in time...
+#         if self.done():
+#             # promise finished so lets see if that result was an exception or not
+#             v = JS_PromiseResult(self.ctx.context, self.value)
+#             if JS_IsException(v):
+#                 self._exception = self.ctx.get_raised_exception(v)
+#             else:
+#                 self._result = to_py(self.ctx, v)
+#             # Run all callbacks at this point in time...
 
-            for cb in self._callbacks:
-                cb(self)
-            return True
-        else:
-            return False
+#             for cb in self._callbacks:
+#                 cb(self)
+#             return True
+#         else:
+#             return False
 
 
 
@@ -413,40 +427,40 @@ cdef class Promise(Object):
 
  
 
-    # def prop(self, object key):
-    #     cdef Atom at = to_atom(self.ctx, key)
+#     # def prop(self, object key):
+#     #     cdef Atom at = to_atom(self.ctx, key)
 
-    #     JS_DefineProperty()
+#     #     JS_DefineProperty()
     
 
 
 
 
 
-# From Python docs (This table was brought over as a helpful cheat sheet)
-# 'b' signed char | int  | 1
-# 'B' unsigned char | int | 1
-# 'u' wchar_t | Unicode character | 2 (1)
-# 'w' Py_UCS4 | Unicode character |	4 (2)
-# 'h' signed short | int | 2
-# 'H' unsigned short | int | 2
-# 'i' signed int | int | 2
-# 'I' unsigned int | int | 2
-# 'l' signed long | int | 4
-# 'L' unsigned long | int | 4
-# 'q' signed long long | int | 8
-# 'Q' unsigned long long | int | 8
-# 'f' float | float | 4
-# 'd' double | float | 8
+# # From Python docs (This table was brought over as a helpful cheat sheet)
+# # 'b' signed char | int  | 1
+# # 'B' unsigned char | int | 1
+# # 'u' wchar_t | Unicode character | 2 (1)
+# # 'w' Py_UCS4 | Unicode character |	4 (2)
+# # 'h' signed short | int | 2
+# # 'H' unsigned short | int | 2
+# # 'i' signed int | int | 2
+# # 'I' unsigned int | int | 2
+# # 'l' signed long | int | 4
+# # 'L' unsigned long | int | 4
+# # 'q' signed long long | int | 8
+# # 'Q' unsigned long long | int | 8
+# # 'f' float | float | 4
+# # 'd' double | float | 8
 
 
-# cdef Value from_array(Context ctx, array arr):
-#     cdef char tc = arr.ob_descr.typecode
+# # cdef Value from_array(Context ctx, array arr):
+# #     cdef char tc = arr.ob_descr.typecode
 
-#     if tc == 'B':
-#         JS_NewUint8ArrayCopy(ctx.context, arr.ob_descr.as_uchars, <size_t>arr.ob_size)
-#     elif tc == 'b':
-#         JS_NewArrayBuffer()
+# #     if tc == 'B':
+# #         JS_NewUint8ArrayCopy(ctx.context, arr.ob_descr.as_uchars, <size_t>arr.ob_size)
+# #     elif tc == 'b':
+# #         JS_NewArrayBuffer()
 
 
 

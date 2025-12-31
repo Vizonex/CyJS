@@ -14,10 +14,15 @@ cdef extern from "Python.h":
 /* XXX: Cython gets into trouble with these formats */
 
 #define CYJS_ErrFormat(exc, desc, stack) \\
-    PyErr_Format(exc, "%s\\n%s", cstring, (stack ? stack: ""))
+    PyErr_Format(exc, "%s\\n%s", desc, (stack ? stack: ""))
     """
     PyObject* CYJS_ErrFormat(object exc, const char* desc, const char* stack)
-    object PyErr_GetRaisedException()
+
+cdef extern from "bridge.h":
+    int cyjs_get_buffer(object obj, Py_buffer* view) except -1
+    void cyjs_release_buffer(Py_buffer* view)
+    object CYJS_FSConvert(object file)
+
 
 
 JS_EVAL_TYPE_GLOBAL = (0 << 0) # global code (default) */
@@ -90,12 +95,23 @@ cdef class Context:
         JS_FreeValue(self.context, exception)
     
     cdef object get_raised_exception(self, JSValue exception):
-        cdef object exc
-        self.handle_exception(exception)
-        exc = PyErr_GetRaisedException()
-        # clean it since were using a promise value (Most likely)
-        PyErr_Clear()
-        return exc
+        cdef object exc = None
+        try:
+            self.raise_existing_exception(exception)
+            raise
+        except Exception as exc:
+            return exc
+
+    
+    cdef JSValue js_eval(
+        self, 
+        const char *input, 
+        size_t input_len, 
+        const char *filename, 
+        int eval_flags
+    ):
+        return JS_Eval(self.context, input, input_len, filename, eval_flags)
+
 
 
 

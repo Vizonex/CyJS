@@ -8,7 +8,7 @@ from libc.stdint cimport uint8_t as uint8_t
 from libc.stdint cimport uintptr_t as uintptr_t
 from libc.stdio cimport FILE as FILE
 
-cdef extern from "quickjs/quickjs.h" nogil:
+cdef extern from "quickjs.h" nogil:
     enum pxdgen_anon_toplevel_0:
         JS_TAG_FIRST = -9
         JS_TAG_BIG_INT = -9

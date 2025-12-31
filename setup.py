@@ -10,20 +10,17 @@ use_system_lib = bool(int(os.environ.get("QUICKJS_USE_SYSTEM_LIB", 0)))
 PARENT_DIR = Path(__file__).parent
 QUICKJS_DIR = PARENT_DIR / "quickjs"
 
-quickjs_sources = [
+quickjs_sources = list(map(str, [
     QUICKJS_DIR / "cutils.c",
     QUICKJS_DIR / "dtoa.c",
     QUICKJS_DIR / "libregexp.c",
     QUICKJS_DIR / "libunicode.c",
     QUICKJS_DIR / "quickjs.c"
-]
+]))
 
 class quickjs_build_ext(build_ext):
-    quickjs_dir = os.path.join("deps", "c-ares")
-    build_config_dir = os.path.join("deps", "build-config")
-    ext_headers = os.path.join("quickjs")
-
     # Brought over from winloop since these can be very useful.
+    
     user_options = build_ext.user_options + [
         ("cython-always", None, "run cythonize() even if .c files are present"),
         (
@@ -41,25 +38,6 @@ class quickjs_build_ext(build_ext):
         self.parallel = True
         super().initialize_options()
 
-    def add_include_dir(self, dir, force=False):
-        if use_system_lib and not force:
-            return
-        dirs = self.compiler.include_dirs
-        dirs.insert(0, dir)
-        self.compiler.set_include_dirs(dirs)
-
-
-    def build_extensions(self):
-        self.add_include_dir(self.ext_headers)
-        c = self.compiler
-        
-        if not os.path.exists("build"):
-                os.mkdir("build")
-        sources = list(map(str, quickjs_sources))
-
-        objects = c.compile(sources, "build")
-        c.create_static_lib(objects, output_libname="cares", output_dir="build")
-        
     # Copied from winloop
     def finalize_options(self):
         need_cythonize = self.cython_always
@@ -89,7 +67,7 @@ class quickjs_build_ext(build_ext):
             # imported Cython before setup_requires injected the
             # correct egg into sys.path.
             try:
-                import Cython
+                import Cython # type: ignore  # noqa: F401
             except ImportError:
                 raise RuntimeError(
                     "please install cython to compile cyjs from source"
@@ -119,30 +97,30 @@ class quickjs_build_ext(build_ext):
 
         return super().finalize_options()
 
+
+def pyx_ext(file:str):
+    return Extension(
+        f"cyjs.{file}", 
+        [f"cyjs/{file}.pyx"] + quickjs_sources, 
+        include_dirs=[str(PARENT_DIR / "quickjs")],
+        define_macros=[
+            ('WIN32_LEAN_AND_MEAN', '1'), 
+            ('_WIN32_WINNT','0x0601')] if sys.platform == "win32" else [],
+        extra_compile_args=[
+            "/std:c11",
+            "/experimental:c11atomics"
+        ] if sys.platform == "win32" else []
+    )
+
+
 if __name__ == "__main__":
     setup(
         ext_modules=[
-            Extension(
-                "cyjs.cyjs",
-                ["cyjs/cyjs.pyx"],
-                # extra_compile_args=["-O2"]
-            ),
-            Extension(
-                "cyjs.context",
-                ["cyjs/context.pyx"],
-            ),
-            Extension(
-                "cyjs.mem",
-                ["cyjs/mem.pyx"],
-            ),
-            Extension(
-                "cyjs.runtime",
-                ["cyjs/runtime.pyx"]
-            ),
-            Extension(
-                "cyjs.value",
-                ["cyjs/value.pyx"]
-            )
+            pyx_ext("cyjs"),
+            pyx_ext("context"),
+            pyx_ext("mem"),
+            pyx_ext("runtime"),
+            pyx_ext("value")
         ],
         cmdclass={"build_ext": quickjs_build_ext},
     )

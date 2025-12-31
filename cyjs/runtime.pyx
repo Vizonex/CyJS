@@ -67,6 +67,10 @@ cdef class Runtime:
         JS_ComputeMemoryUsage(self.rt, &mu)
         return MemoryUsage.new(&mu)
 
+    def dump_memory_usage(self, object filename):
+        if CYJS_DumpMemoryUsage(self.rt, filename) < 0:
+            raise
+
 
     cpdef void update_statck_top(self):
         JS_UpdateStackTop(self.rt)

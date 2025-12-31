@@ -1,2 +1,1 @@
-def hello() -> str:
-    return "Hello from cyjs!"
+from .runtime import Runtime  # noqa: F401

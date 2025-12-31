@@ -1,0 +1,22 @@
+
+# Cythonizing / Compilied Sources
+cyjs/*.c
+
+# Compiled sources Windows / Linux / Apple Macbooks / Etc...
+cyjs/*.pyd
+cyjs/*.so
+
+# Html Sources
+cyjs/*.html
+
+
+# pip install -e . or uv pip install -e .
+*.egg-info
+# cyhton build
+build
+# __pycache__
+__pycache__
+
+.venv
+.vscode
+.pytest_cache

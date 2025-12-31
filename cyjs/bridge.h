@@ -112,6 +112,12 @@ static JSRuntime* CYJS_NewRuntime(void* opaque){
 }
 
 
+static PyObject* CYJS_FSConvert(PyObject* file){
+    PyObject* filename_bytes = NULL;
+    if (PyUnicode_FSConverter(file, &filename_bytes) < 0)
+        return NULL;
+    return filename_bytes;
+}
 
 static int CYJS_DumpMemoryUsage(JSRuntime* rt, PyObject* file){
     

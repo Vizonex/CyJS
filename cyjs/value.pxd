@@ -18,3 +18,4 @@ cdef class Value:
     @staticmethod
     cdef Value from_value(Context ctx, JSValue value)
     
+    cpdef bytes to_json(self)
