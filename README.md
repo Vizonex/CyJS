@@ -12,6 +12,7 @@ ECMAScript interpreter for Cython & Python built for
 - Being tiny and easy to use
 - Having ECMA6 Support
 - Having a maintained backend (QuickJS-NG)
+- Being a good companion alongside [selectolax](https://github.com/rushter/selectolax).
 
 ## Alternative Python Javascript Interpreters
 
@@ -23,6 +24,7 @@ ECMAScript interpreter for Cython & Python built for
 | pyduktape2 | No |  Small | somewhat fast but the backend is unmaintained and lacks proper type-hinting | Because this one didn't have that and my pull requests kept being laid dormant I wrote __pyduktape3__ | can't be done
 | [pyduktape3](https://github.com/Vizonex/pyduktape3) | No |  Small | Very fast but the backend made by me but the C backend is unmaintained which is why the project was soon abandoned in favor of __cyjs__ | I did add typestubs to this library. | The Last cherry on top this was cimporting pyducktape3
 | strv8 |  I haven't tried this one yet (Might be due to lack of windows support but I don't remeber)  |  Large due to V8  | Probably very fast becuase v8 is built by google. | I don't know, I sure hope a project like this has that. | I haven't seen the sourcecode yet...
+
 
 
 
