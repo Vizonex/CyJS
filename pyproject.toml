@@ -1,0 +1,23 @@
+[project]
+name = "cyjs"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Vizonex", email = "VizonexBusiness@gmail.com" }
+]
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.cibuildwheel]
+build-frontend = "build"
+enable = ["cpython-freethreading"]
+
+
+[build-system]
+requires = ["setuptools", "cython", "wheel"]
+
+
+[tool.setuptools]
+zip-safe = false
+packages = ['cyjs']
