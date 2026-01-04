@@ -196,9 +196,9 @@ cdef extern from "quickjs.h" nogil:
         JSValue (*get_property)(JSContext*, JSValue, JSAtom, JSValue)
         int (*set_property)(JSContext*, JSValue, JSAtom, JSValue, JSValue, int)
     
-    ctypedef void (*JSClassFinalizer)(JSRuntime*, JSValue)
-    ctypedef void (*JSClassGCMark)(JSRuntime*, JSValue, JS_MarkFunc*)
-    ctypedef JSValue (*JSClassCall)(JSContext*, JSValue, JSValue, int, JSValue*, int)
+    ctypedef void (*JSClassFinalizer)(JSRuntime*, JSValue) noexcept with gil
+    ctypedef void (*JSClassGCMark)(JSRuntime*, JSValue, JS_MarkFunc*) noexcept with gil
+    ctypedef JSValue (*JSClassCall)(JSContext*, JSValue, JSValue, int, JSValue*, int) noexcept with gil
     ctypedef struct JSClassDef:
         const char* class_name
         JSClassFinalizer* finalizer

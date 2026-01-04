@@ -1,12 +1,27 @@
 from .quickjs cimport *
 from cpython.bytes cimport PyBytes_FromStringAndSize
 from cpython.unicode cimport PyUnicode_FromString, PyUnicode_FromStringAndSize
-from cpython.exc cimport PyErr_NoMemory, PyErr_SetObject
-
-from cpython.long cimport PyLong_FromString
+from cpython.exc cimport PyErr_NoMemory, PyErr_SetObject, PyErr_WriteUnraisable
+from cpython.mem cimport PyMem_Malloc, PyMem_Realloc, PyMem_Free
+from cpython.long cimport PyLong_FromString, PyLong_AsLongAndOverflow
 from cpython.bool cimport PyBool_FromLong
+from cpython.buffer cimport PyObject_CheckBuffer
+from cpython.tuple cimport PyTuple_GET_SIZE
+from cpython.list cimport PyList_AsTuple
+from cpython.object cimport PyObject_CallObject
+
+cdef extern from "Python.h":
+    # tweaked signature just a little for our purposes...
+    object PyTuple_GET_ITEM(object p, Py_ssize_t pos)
+    JSValue CYJS_ThrowException(JSContext* ctx, const char* msg)
+    void Py_XDECREF(object)
+
+
 
 cimport cython
+
+# TODO: I'm writing a new cython utils library and a yyjson writer would be a good use-case here...
+import json
 
 cdef class JSError(Exception):
     """Represents Numerous Exceptions raised from CYJS"""
@@ -71,10 +86,92 @@ cdef class MemoryUsage:
         return self
 
 
+# JS Python function inspired by the Old QuickJS Python library
+# cdef class JSPyFunction:
+#     cdef:
+#         # Might have it carry runtime parent as a means
+#         # of preventing immediate gc from taking over...
+#         readonly Runtime rt
+#         object func
+#         JSValue val
+
+#     cdef object call(self, Context ctx, JSValue* argv, int argc):
+#         cdef arg_parser_t p
+#         cdef tuple py_args
+#         # since were unpacking to python we say
+#         # to the arg_parser that len is filled also...
+#         # this will not attempt to put objects on the heap if 
+#         # done so correctly.. 
+
+#         # will have whatever the thrown exception be to be handled
+#         # via jspy_func_call named after js2py
+#         arg_parser_init(&p, ctx.ctx, argv, argc, argc)
+#         try:
+#             py_args = arg_parser_unpack(&p)
+#             return PyObject_CallObject(self.func, py_args)
+#         finally:
+#             arg_parser_finish(&p)
+
+
+
+# TODO: Asynchronous capabilities planned as soon as they can be
+# figured out, for now only regular functions are acceptable...
+# a wrapper for asynchronous capabilities to make things easier is aiojs
+
+# cdef JSValue jspy_func_call(JSContext *ctx, JSValue func_obj,
+#     JSValue this_val, int argc, JSValue *argv, int unused_flags) noexcept with gil:
+#     cdef str err_msg
+#     cdef Py_buffer err_view
+#     cdef Context context = <Context>(JS_GetContextOpaque(ctx))
+#     cdef JSPyFunction fn = <JSPyFunction>(JS_GetOpaque(func_obj, context.runtime.py_function_id))
+#     cdef JSValue ret = JS_NULL # just incase of a crash
+#     cdef object py_ret
+#     try:
+#         py_ret = fn.call(context, argv, argc)
+#         if to_quickjs(ctx, &ret, py_ret) < 0:
+#             raise
+#         return ret
+
+#     # TODO: KeyboardInterrupt system?
+#     except Exception as e:
+#         try:
+#             err_msg = str(e)
+#             if cyjs_get_buffer(err_msg, &err_view) < 0:
+#                 return CYJS_ThrowException(ctx, "Unable to throw Python Exception due to failure with the exception")
+#             ret = CYJS_ThrowException(ctx, <const char*>err_view.buf)
+#             cyjs_release_buffer(&err_view)
+
+#         except Exception:
+#             return CYJS_ThrowException(ctx, "Unable to throw Python Exception due to failure with the exception")
+
+
+# cdef void jspy_func_finalizer(JSRuntime* rt, JSValue val) noexcept with gil:
+#     cdef Runtime pyrt = <Runtime>JS_GetRuntimeOpaque(rt)
+#     cdef JSPyFunction js2py = JS_GetOpaque(val, pyrt.py_function_id)
+#     # This is probably the best we can do as in terms of Object deletion
+#     Py_XDECREF(js2py)
+
+
+
+
+
+# Todo: allow Name Overriding feature to evade captcha solver failures
+# cdef void js_python_func_class_init(JSClassDef* d, const char* name):
+#     d.name = name
+#     d.call = jspy_func_call
+#     d.finalizer = jspy_func_finalizer
+    
 
 cdef class Runtime:
     def __init__(self) -> None:
         self.rt = CYJS_NewRuntime(<void*>self)
+        
+        # just needed for bridging w/ python. We can add discrete settings for
+        # webscraping a bit later...
+        # js_python_func_class_init(&self.py_function_class_def, "JS2PYFunction")
+        # JS_NewClassID(self.rt, &self.py_function_id)
+        # JS_NewClass(self.rt, &self.py_function_class_def)
+
 
     cpdef MemoryUsage compute_memory_usage(self):
         cdef JSMemoryUsage mu
@@ -151,6 +248,161 @@ cdef object atom_to_py(JSContext* ctx, JSAtom at):
         return PyUnicode_FromStringAndSize(c_str, <Py_ssize_t>size)
     finally:
         JS_FreeCString(ctx, c_str)
+
+# TODO: Planned for to_quickjs to speedup certain funtions 
+# soon as I can get around to testing it...
+# ctypedef fused cyjs_object_t:
+#     object
+#     Object
+
+# this gets used quite a few times hence inlining it felt 
+# like the best choice of apporch
+cdef inline int fast_parse_json_from_obj(JSContext* ctx, JSValue* val, object obj) noexcept:
+    cdef Py_buffer view
+    cdef JSValue value
+    
+    if cyjs_get_buffer(obj, &view) < 0:
+        return -1
+    value = JS_ParseJSON(ctx, <const char*>view.buf, <size_t>view.len, b"<input>")
+    cyjs_release_buffer(&view)
+    if JS_IsException(value):
+        return -1
+    # same as *val = value in C since were just saying pick up this address please.
+    val[0] = value
+    return 0
+
+
+cdef inline int fast_serlize_dict_or_list(JSContext* ctx, JSValue* val, object obj) noexcept:
+    try:
+        # TODO: Try using an external json cython library for this
+        # in the future (I think I had a yyjson thingy somewhere 
+        # and a rewrite of that project to become cython-only might 
+        # do well here)
+        return fast_parse_json_from_obj(ctx, val, json.dumps(obj))
+    except BaseException:
+        # reraise later...
+        return -1
+
+cdef inline int fast_serlize_string(JSContext* ctx, JSValue* val, object obj):
+    cdef Py_buffer view
+    cdef JSValue value
+    
+    if cyjs_get_buffer(obj, &view) < 0:
+        return -1
+    value = JS_NewStringLen(ctx, <const char*>view.buf, <size_t>view.len)
+    cyjs_release_buffer(&view)
+    if JS_IsException(value):
+        return -1
+    val[0] = value
+    return 0
+
+
+
+# Returns -1 on failre as a failsafe for C to evacuate safely from
+cdef int to_quickjs(JSContext* ctx, JSValue* val, object obj) noexcept:
+    # Start with the best case scenario
+    cdef int overflow = 0
+    cdef long ival
+    
+    if isinstance(obj, Object):
+        val[0] = (<Object>obj).value
+        return 0
+    elif isinstance(obj, bool):
+        val[0] = JS_NewBool(ctx, <bint>obj)
+        return 0
+    
+    elif isinstance(obj, int):
+        ival = PyLong_AsLongAndOverflow(obj, &overflow)
+        if overflow:
+            return fast_parse_json_from_obj(ctx, val, repr(obj))
+        val[0] = JS_NewInt32(ctx, ival)
+        return 0
+ 
+    elif isinstance(obj, float):
+        val[0] = JS_NewFloat64(ctx, <double>obj)
+        return 0
+    
+    elif isinstance(obj, str) or PyObject_CheckBuffer(obj):
+        return fast_serlize_string(ctx, val, obj)
+    
+    elif isinstance(obj, (dict, list)):
+        return fast_serlize_dict_or_list(ctx, val, obj)
+
+    PyErr_SetObject(TypeError, f"unknown object {type(obj).__name__!r}")
+    return -1
+
+
+
+            
+
+# Argument parser (Not public)
+
+cdef struct arg_parser_t:
+    Py_ssize_t size # heap size
+    Py_ssize_t len # objects held
+    JSValue* values # objects
+    JSContext* ctx # js context
+    bint heap # realloc was called.
+
+# does both incomming and outgoing python and js values
+# in both directions
+cdef void arg_parser_init(arg_parser_t* self, JSContext* ctx, JSValue* values, Py_ssize_t size, Py_ssize_t len):
+    self.ctx = ctx
+    self.values = values
+    self.size = size
+    self.len = len
+    self.heap = 0
+
+
+cdef int arg_parser_append(arg_parser_t* self, JSValue val):
+    cdef Py_ssize_t new_size
+    cdef JSValue* new_values
+    if self.len >= self.size:
+        new_size = self.size * 2
+        new_values = <JSValue*>js_realloc(self.ctx, self.values, new_size * sizeof(JSValue))
+        if new_values == NULL:
+            PyErr_NoMemory()
+            return -1
+        self.heap = 1
+        self.values = new_values
+        self.size = new_size
+
+    self.values[self.len] = val
+    self.len += 1
+    return 0
+
+cdef int arg_parser_pack(arg_parser_t* self, tuple args):
+    cdef Py_ssize_t i
+    cdef Py_ssize_t size = PyTuple_GET_SIZE(args)
+    cdef JSValue val
+
+    for i in range(size):
+        if to_quickjs(self.ctx, &val, PyTuple_GET_ITEM(args, i)) < 0:
+            return -1
+        if JS_IsException(val):
+            return -1
+        if arg_parser_append(self, val) < 0:
+            return -1
+    return 0
+
+# While being Python error handled this parser does the reverse to pack
+# when handling incoming objects.
+cdef tuple arg_parser_unpack(arg_parser_t* self):
+    cdef Py_ssize_t i
+    cdef list args = [to_python(self.ctx, JS_DupValue(self.ctx, self.values[i])) for i in range(self.len)]
+    return PyList_AsTuple(args)
+
+
+cdef void arg_parser_finish(arg_parser_t* self):
+    cdef Py_ssize_t i
+    # Free them all...
+    for i in range(self.len):
+        JS_FreeValue(self.ctx, self.values[i])
+
+    if self.heap:
+        # if we had ownership over a heap (mostly in python -> js cases)
+        # free the heap.
+        js_free(self.ctx, self.values)
 
 
 # base for gathering iterations
@@ -266,6 +518,99 @@ cdef class Object:
         JS_FreeCString(self.ctx, data)
         return ret
 
+    # serves for debugging type tags
+    @property
+    def tag(self):
+        return JS_VALUE_GET_TAG(self.value)
+
+
+    def get(self, key, *args):
+        if len(args) > 1:
+            raise RuntimeError("Wrong number of arguments expected <= 2 got %i" % len(args))
+
+        cdef JSValue v
+        cdef JSAtom atom
+        cdef JSContext* ctx = self.ctx
+
+        # raise exception if hit
+        if py_to_atom(ctx, key, &atom) < 0:
+            raise
+        
+        v = JS_GetProperty(ctx, self.value, atom)
+        if JS_IsException(v):
+            if len(args) < 1:
+                raise KeyError(key)
+            else:
+                # get default
+                return args[0]
+
+        # Dup JS_Value because to_python can and will Free information
+        return to_python(ctx, JS_DupValue(ctx, v))
+
+    def set(self, object key, object value):
+        cdef JSContext* ctx = self.ctx
+        cdef JSValue js_value 
+        cdef JSAtom atom
+
+        if py_to_atom(ctx, key, &atom) < 0:
+            raise
+
+        if to_quickjs(ctx, &js_value, value) < 0:
+            self.context.raise_exception()
+            # raising the second time will be for if python is at fault for this.
+            raise
+
+        if JS_IsException(js_value):
+            self.context.raise_exception()
+            # raising the second time will be for if python is at fault for this.
+            raise
+
+        if JS_SetProperty(ctx, self.value, atom, js_value) < 0:
+            raise AttributeError(f"Could not set {key} to Object")
+
+    def __call__(self, *args):
+        cdef arg_parser_t p
+        cdef JSValue values[10]
+        cdef JSValue ret
+        # we will have 10 free slots with a start position of 0
+        arg_parser_init(&p, self.ctx, values, 10, 0)
+        try:
+            if arg_parser_pack(&p, args) < 0:
+                # see if it's QuickJs's Fault otherwise the Fault falls to python
+                self.context.raise_exception()
+                # raising the second time will be for if python is at fault for this.
+                raise
+
+            ret = JS_Call(self.ctx, self.value, JS_NULL, p.len, p.values)
+
+            if JS_IsException(ret):
+                self.context.raise_exception()
+                # this should almost never occur but if it does do this
+                raise JSError("raised exception without it being Quickjs's own fault")
+            return to_python(self.ctx, ret)
+
+        finally:
+            # Cleanup
+            arg_parser_finish(&p)
+
+    def invoke(self, object func, *args):
+        cdef JSAtom atom
+        cdef JSContext* ctx = self.ctx
+        cdef JSValue ret
+        cdef JSValue js_args[10]
+        cdef arg_parser_t p
+
+        if py_to_atom(ctx, func, &atom) < 0:
+            raise
+
+        arg_parser_init(&p, self.ctx, js_args, 10, 0)
+        try:
+            if arg_parser_pack(&p, args) < 0:
+                raise
+            ret = JS_Invoke(ctx, self.value, atom, p.len, p.values)
+            return to_python(ctx, ret)
+        finally:
+            arg_parser_finish(&p)
 
 
     def __dealloc__(self):
@@ -280,7 +625,26 @@ cdef class Object:
     
     def keys(self):
         return _ObjectKeysView(self)
-        
+
+# cdef class JSFunction:
+
+#     @staticmethod
+#     cdef JSFunction new(
+#         Context ctx,
+#         JSValue value,
+#         object func
+#     ):
+#         cdef JSFunction self = JSFunction.__new__(JSFunction)
+#         self.ctx = ctx.ctx
+#         self.context = ctx
+#         self.value = value
+#         if JS_SetOpaque(self.value, <void*>self) < 0:
+#             self.context.raise_exception()
+#             raise
+#         # reverse callback to python
+#         self.func = func
+
+
 
 
 
@@ -289,8 +653,10 @@ cdef class Context:
         self.rt = runtime.rt
         self.ctx = runtime.new_context()
         JS_SetContextOpaque(self.ctx, <void*>self)
+        # JS_SetClassProto(self.ctx)
         # we don't access the parent (unless on rare occations)
         self.runtime = runtime
+
 
     cdef bint has_exception(self):
         return JS_HasException(self.ctx)
@@ -361,7 +727,14 @@ cdef class Context:
             raise
         ret = JS_ParseJSON(self.ctx, <const char*>view.buf, view.len, b"<input>")
         cyjs_release_buffer(&view)
+        # it will be transformed to a Object as needed instead of typical python
         return to_python(self.ctx, ret)
+
+    
+
+
+
+    
 
     # TODO: Soon as I figure out how to make callbacks and promises work...
     # Another library called aiojs plans to be worked on work making python's asyncio
@@ -557,6 +930,7 @@ cdef object to_python(JSContext* ctx, JSValue value):
     
     # Unimplemented (Hold onto value so we can free it up later)
     return jsv_to_object(ctx, value)
+
 
 
 
