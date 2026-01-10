@@ -31,5 +31,25 @@ converstions and vice versa. as well as how `Context` varaibles should work.
 
 
 
+## How to Contribute
+There's a few things I didn't get to becuase they are more or less puzzles to implement than they need to be
+but if anybody can figure these out feel free to fork and send a pull request along with a test added to pytest
+for eatch to ensure it works correctly. I may be uploading this library to pypi after the other things are implemented but these seem more of a chore for me to solve than really anything else.
 
+- [ ] If anybody finds a smarter approch to anything that has already been written throw me an issue or pull request.
+
+- [ ] JSCFunction I haven't figured out a good solution for this one just yet since I'm trying to limit the number of cdef classes to keep the code small and easy to compile. We need a way to bind an opaque Python Object and trying the old quickjs method seems to trigger crashes (believe me when I say I tried doing that already).
+
+- [ ] JSClass cdef class extension that can be subclassed in python and cython along with the hooks for all the JSClassExoticMethods (we need an approch to passing off a cdef class as an opaque value which I have not figured out how to do yet)
+    - [ ] JSClassFinalizer Hook
+    - [ ] JSClassGCMark Hook
+    - [ ] A safe approch for handling JSClass to python object conversion and vice versa (if possible)
+
+- [ ] A Way to cancel a Promise Object which could lead to the creation of an __aiojs library__ extension built off this library for quickjs with callbacks from Promise to asyncio.Future while taking cancellation into consideration and adding Python Coroutine Support for quickjs-ng to be able figure out how to handle correctly.
+- [ ] Maybe an easier way to pass off arguments from quickjs to python functions without making the code feel like we are fluking it.
+- [ ] A Way to raise python exceptions from quickjs if possible.
+- [ ] Better typehinting would be a bonus if someone could pull that off.
+- [ ] A couple examples would be nice. If you need inspiration or an example yt-dlp-ejs might be a good freebie.
+- [ ] C Extension Modules from python functions or modules have not been implemented yet due to the same problems as JSCFunction and JSClass being more or less puzzles to bind to python than they need to be.
+- [ ] If anybody can figure out a way to make JS Arrays convert to any Python array or List (Preferrably array.array if the JS Array isn't typed but a list if it is typed) Feel free to figure this out for me.
 
