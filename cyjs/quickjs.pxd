@@ -411,7 +411,7 @@ cdef extern from "quickjs.h" nogil:
     
     ctypedef void (*JSPromiseHook)(JSContext*, JSPromiseHookType, JSValue, JSValue, void*) noexcept with gil
     void JS_SetPromiseHook(JSRuntime*, JSPromiseHook, void*)
-    ctypedef void (*JSHostPromiseRejectionTracker)(JSContext*, JSValue, JSValue, bint, void*)
+    ctypedef void (*JSHostPromiseRejectionTracker)(JSContext*, JSValue, JSValue, bint, void*) noexcept with gil
     void JS_SetHostPromiseRejectionTracker(JSRuntime*, JSHostPromiseRejectionTracker*, void*)
     ctypedef int (*JSInterruptHandler)(JSRuntime*, void*)
     void JS_SetInterruptHandler(JSRuntime*, JSInterruptHandler*, void*)
@@ -473,8 +473,8 @@ cdef extern from "quickjs.h" nogil:
     JSValue JS_NewCFunction3(JSContext*, JSCFunction*, const char*, int, JSCFunctionEnum, int, JSValue)
     JSValue JS_NewCFunctionData(JSContext*, JSCFunctionData*, int, int, int, JSValue*)
     JSValue JS_NewCFunctionData2(JSContext*, JSCFunctionData*, const char*, int, int, int, JSValue*)
-    ctypedef void (*JSCClosureFinalizerFunc)(void*)
-    JSValue JS_NewCClosure(JSContext*, JSCClosure*, const char*, JSCClosureFinalizerFunc*, int, int, void*)
+    ctypedef void (*JSCClosureFinalizerFunc)(void*) noexcept with gil
+    JSValue JS_NewCClosure(JSContext*, JSCClosure, const char*, JSCClosureFinalizerFunc, int, int, void*)
     JSValue JS_NewCFunction(JSContext*, JSCFunction*, const char*, int)
     JSValue JS_NewCFunctionMagic(JSContext*, JSCFunctionMagic*, const char*, int, JSCFunctionEnum, int)
     void JS_SetConstructor(JSContext*, JSValue, JSValue)

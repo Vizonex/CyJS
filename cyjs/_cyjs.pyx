@@ -199,6 +199,12 @@ cdef class PromiseHook:
             self.exception = e
             self.has_exception = True
 
+# cdef void on_promise_rejection_tracker_hook(JSContext*, JSValue, JSValue, bint, void* opaque) noexcept with gil:
+
+
+# @cython.internal
+# cdef class PromiseRejectionTracker:
+
 
 
 
@@ -342,6 +348,14 @@ cdef inline int fast_serlize_string(JSContext* ctx, JSValue* val, object obj):
     return 0
 
 
+cdef inline JSValue py_to_js_exception(JSContext* ctx, object obj):
+    cdef Py_buffer view
+    cdef JSValue value
+    if cyjs_get_buffer(obj, &view) < 0:
+        return CYJS_ThrowException(ctx, "Unable to create exception from a string object")
+    value = CYJS_ThrowException(ctx, <const char*>view.buf)
+    cyjs_release_buffer(&view)
+    return value
 
 # Returns -1 on failre as a failsafe for C to evacuate safely from
 cdef int to_quickjs(JSContext* ctx, JSValue* val, object obj) noexcept:
@@ -352,6 +366,16 @@ cdef int to_quickjs(JSContext* ctx, JSValue* val, object obj) noexcept:
     if isinstance(obj, Object):
         val[0] = (<Object>obj).value
         return 0
+    elif isinstance(obj, JSFunction):
+        # very quick shortcut
+        val[0] = (<JSFunction>obj).value
+        return 0
+
+    elif isinstance(obj, Exception):
+        # Convert exception
+        val[0] = py_to_js_exception(ctx, obj)
+        return 0
+    
     elif isinstance(obj, bool):
         val[0] = JS_NewBool(ctx, <bint>obj)
         return 0
@@ -372,6 +396,8 @@ cdef int to_quickjs(JSContext* ctx, JSValue* val, object obj) noexcept:
 
     elif isinstance(obj, (dict, list)):
         return fast_serlize_dict_or_list(ctx, val, obj)
+
+
 
     PyErr_SetObject(TypeError, f"unknown object {type(obj).__name__!r}")
     return -1
@@ -665,6 +691,86 @@ cdef class Object:
         return _ObjectKeysView(self)
 
 
+# Will use a closure to gain access to this function since there isn't a reasonable 
+# way to obtain it elsewhere using a INCREF (on creation) and DECREF (on finalization) respectively... 
+
+cdef JSValue on_cclosure_callback(JSContext *ctx, 
+    JSValue this_val, 
+    int argc, JSValue *argv,
+    int magic, void *func_data) noexcept with gil:
+    cdef JSFunction jsfunc = <JSFunction>(func_data)
+    return jsfunc.call_js(ctx, this_val, argc, argv, magic)
+
+
+# TODO: (Vizonex) Check if using INCREF and DECREF Causes memory leaks
+# Everyone Else: Feel free to throw an issue if this is casuing memory leaks on your end.
+cdef void on_cclosure_opaque_finalize(void *opaque) noexcept with gil:
+    cdef JSFunction jsfunc = <JSFunction>opaque
+    # Deref it as it possibly means we finished needing it within Quickjs
+    Py_XDECREF(jsfunc)
+
+
+# An async binding for python asynchronous functions might be in consideration for the future
+# as part of the aiojs project planned for the future of 2026 - Vizonex
+cdef class JSFunction:
+    """Used for acting as a bridge between Javascript and Python
+    it is meant to be used as an access-point for Javascript (ECMA) to be called upon
+    through python. It's not subclassed to Object however due to it's own nature
+    but if needed can be accessed from the object property"""
+
+
+    # Converter for JSFunction
+    @staticmethod
+    cdef JSFunction new(Context context, object func):
+        cdef JSFunction self = JSFunction.__new__(JSFunction)
+        self.context = context
+        self.ctx = context.ctx
+        # NOTE: self.value comes in a bit later...
+        self.func = func
+        return self
+
+    def __dealloc__(self):
+        JS_FreeValue(self.ctx, self.value)
+
+    # quick access shortcut for calling JSFunction as if it were a python function.
+    def __call__(self, *args, **kwds):
+        return self.func.__call__(self, *args, **kwds)
+
+    @property
+    def object(self):
+        """Obtains the value as a Javascript Object that could in theory be manipulated
+        NOTE: that this calls upon JS_DupValue to prevent derefing the values"""
+        return jsv_to_object(self.ctx, JS_DupValue(self.ctx, self.value))
+
+    cdef JSValue call_js(self, JSContext *ctx, JSValue this_val, int argc, JSValue *argv, int magic) noexcept:
+        cdef arg_parser_t parser
+        cdef tuple args
+        cdef object ret
+        cdef JSValue js_ret
+        arg_parser_init(&parser, ctx, argv, argc, argc)
+
+        try:
+            args = arg_parser_unpack(&parser)
+            ret = PyObject_CallObject(self.func, args)
+            arg_parser_finish(&parser)
+            
+            if to_quickjs(ctx, &js_ret, ret) < 0:
+                raise
+            return js_ret
+
+        except Exception as e:
+            arg_parser_finish(&parser)
+            return py_to_js_exception(ctx, e)
+
+
+
+
+
+
+
+        
+
+
 # cdef class InterruptHandler:
 #     @staticmethod
 #     cdef InterruptHandler new(Context ctx, object cb):
@@ -828,35 +934,55 @@ cdef class Context:
             JS_FreeValue(self.ctx, glob)
     
 
-    # cpdef object add_callable(self, object func, object name = None):
-    #     """wraps a python callable to quickjs."""
-    #     cdef JSValue value
-    #     cdef JSAtom atom
-    #     cdef JSValue glob, function
-
-    #     if not callable(func):
-    #         raise TypeError("func argument should be callable")
-    #     name = getattr(func, "__name__") if name is None else name
+    cpdef JSFunction add_function(
+        self, 
+        object func, 
+        object name = None, 
+        # personally IDK how this variable works it's just here if someone knows how to use it...
+        int magic = 11 
+        ):
+        """adds a python function to quickjs using 
+        `JS_NewCClosure` since Quickjs-ng doesn't have 
+        a good way for bidning python fucntions well yet
         
-    #     if py_to_atom(self.ctx, name, &atom) < 0:
-    #         raise
-    #     if to_quickjs(self.ctx, &value, name) < 0:
-    #         raise
+        :param func: the python function to invoke with 
+            quickjs note: that it may not pass along keyword arguments `**kw`
+        """
+        cdef object _name
+        cdef Py_buffer view
+        cdef int argc
+        cdef JSValue closure
+        cdef JSFunction js_func
+        if not callable(func):
+            raise TypeError("function must be callable.")
 
-    #     function = JS_NewObjectClass(self.ctx, self.runtime.py_function_id)
-    #     if JS_IsException(function):
-    #         self.raise_exception()
+        _name = name or func.__name__
 
-    #     glob = JS_GetGlobalObject(self.ctx)
-    #     if JS_DefinePropertyValue(self.ctx, function, atom, value, JS_PROP_CONFIGURABLE) < 0:
-    #         JS_FreeValue(self.ctx, glob)
-    #         raise RuntimeError("JS_DefinePropertyValue failed")    
+        # Were bindly guessing but in the future, a smarter technique should be gone about
+        # Otherwise I'll expand this number to the very maximum number of arguments
+        # as python can accept dynamic numbers without question at times...
+        argc = <int>len(func.__annotations__)
         
-    #     # do not let the function dissappear unless it has permission to go away...
-    #     Py_XINCREF(func)
-    #     JS_SetOpaque(value, <void*>func)
-    #     JS_FreeValue(self.ctx, glob)
 
+        if cyjs_get_buffer(_name, &view) < 0:
+            raise
+        try:
+        
+            js_func = JSFunction.new(self, func)
+            closure = JS_NewCClosure(self.ctx, on_cclosure_callback, <const char*>view.buf, on_cclosure_opaque_finalize, argc, magic, <void*>js_func)
+            if JS_IsException(closure):
+                self.raise_exception()
+                raise
+            # Have CClosure hold onto it's own reference of js_func if all was successfully implemented
+            Py_XINCREF(js_func)
+            js_func.value = closure
+            return js_func
+        
+        finally:
+            cyjs_release_buffer(&view)
+        
+
+   
 
 
 

@@ -123,7 +123,7 @@ static JSRuntime* CYJS_NewRuntime(void* opaque){
     JSRuntime* rt = JS_NewRuntime2(&py_malloc_funcs, opaque);
     /* it's a bit faster to throw an exception here with only needing
     raise when runtime is NULL */
-    
+
     if (rt == NULL)
         PyErr_NoMemory();
     

@@ -106,8 +106,6 @@ cdef class PromiseHook:
 
     
 
-
-
 cdef class Runtime:
     """
     Represents a JavaScript runtime corresponding to an
@@ -159,10 +157,21 @@ cdef class Object:
 
 
 cdef class JSFunction:
+    """Used for acting as a bridge between Javascript and Python
+    it is meant to be used as an access-point for Javascript (ECMA) to be called upon
+    through python. It's not subclassed to Object however due to it's own nature
+    but if needed can be accessed from the object property"""
     cdef:
+        # access to python Quickjs-ng Context
         readonly Context context
+        JSContext* ctx # quick access to C JSContext
+        JSValue value
+        object func
 
-
+    @staticmethod
+    cdef JSFunction new(Context context, object func)
+    cdef JSValue call_js(self, JSContext *ctx, JSValue this_val, int argc, JSValue *argv, int magic) noexcept
+    
 
 cdef class Context:
     cdef:
@@ -184,7 +193,14 @@ cdef class Context:
         bint backtrace_barrier =*,
         bint promise =*
     )
-    
+
+    cpdef JSFunction add_function(
+        self, 
+        object func, 
+        object name =*, 
+        # personally IDK how this variable works it's just here if someone knows how to use it...
+        int magic =* 
+    )
 
     # For now it will be represented as an Object
     # but in the future it can be represented as a 
