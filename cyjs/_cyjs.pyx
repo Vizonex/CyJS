@@ -837,7 +837,7 @@ cdef class Context:
             raise JSError.new(self.ctx, self.get_exception())
 
     # function setup was inspired by rquickjs's EvalOptions struct
-    cpdef object eval(
+    cdef object _eval(
         self,
         object code,
         object filename = None,
@@ -883,6 +883,26 @@ cdef class Context:
             raise
         return to_python(self.ctx, val)
 
+    cpdef object eval(
+        self, 
+        object code, 
+        object filename = None,
+        bint strict = False,
+        bint backtrace_barrier = False,
+        bint promise = False
+    ):
+        return self._eval(code, filename, module=False, strict=strict, backtrace_barrier=backtrace_barrier, promise=promise)
+
+    cpdef object eval_module(
+        self, 
+        object code, 
+        object filename = None,
+        bint strict = False,
+        bint backtrace_barrier = False,
+        bint promise = False
+    ):
+        return self._eval(code, filename, module=True, strict=strict, backtrace_barrier=backtrace_barrier, promise=promise)
+        
 
     def get_global(self):
         return to_python(self.ctx, JS_GetGlobalObject(self.ctx))

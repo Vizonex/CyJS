@@ -73,6 +73,6 @@ def promise_hook(request: pytest.FixtureRequest) -> Case:
 
 def test_hooks(setup_ctx: tuple[Context, Counter], promise_hook: Case):
     ctx, counter = setup_ctx
-    ret = ctx.eval(promise_hook.code)
+    ret = ctx.eval_module(promise_hook.code)
     assert isinstance(ret, Promise)
     assert counter.is_equal_to(*promise_hook.expected)

@@ -13,7 +13,7 @@ def ctx() -> Context:
 def test_cclosure_eval(ctx: Context) -> None:
     func = ctx.add_function(add, "add")
     ctx.set("add", func)
-    result = ctx.eval("globalThis.add(1, 2)", module=False)
+    result = ctx.eval("globalThis.add(1, 2)")
     assert result == 3
     
 

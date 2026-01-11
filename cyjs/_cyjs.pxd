@@ -184,11 +184,29 @@ cdef class Context:
     cdef bint has_exception(self)
     cdef JSValue get_exception(self)
     cdef object raise_exception(self)
-    cpdef object eval(
+    cdef object _eval(
         self, 
         object code, 
         object filename =*,
         bint module =*, 
+        bint strict =*,
+        bint backtrace_barrier =*,
+        bint promise =*
+    )
+
+    cpdef object eval(
+        self, 
+        object code, 
+        object filename =*,
+        bint strict =*,
+        bint backtrace_barrier =*,
+        bint promise =*
+    )
+
+    cpdef object eval_module(
+        self, 
+        object code, 
+        object filename =*,
         bint strict =*,
         bint backtrace_barrier =*,
         bint promise =*

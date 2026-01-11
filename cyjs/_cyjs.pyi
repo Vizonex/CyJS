@@ -139,7 +139,19 @@ class Context:
         dom_exception: bool = ...,
         promise: bool = ...,
     ) -> None: ...
+
     def eval(
+        self,
+        code: object,
+        filename: object = ...,
+        strict: bool = ...,
+        backtrace_barrier: bool = ...,
+        promise: bool = ...,
+    ) -> object:
+        """evaluates javascript code"""
+        ...
+
+    def eval_module(
         self,
         code: object,
         filename: object = ...,
@@ -148,8 +160,9 @@ class Context:
         backtrace_barrier: bool = ...,
         promise: bool = ...,
     ) -> object:
-        """evaluates javascript code"""
+        """evaluates javascript module code"""
         ...
+    
 
     def get_global(self):  # -> object:
         ...
