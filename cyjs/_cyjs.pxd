@@ -91,8 +91,6 @@ cdef class MemoryUsage:
 cdef class PromiseHook:
     cdef:
         object func
-        object exception
-        bint has_exception
         Runtime rt
 
     @staticmethod
@@ -149,8 +147,10 @@ cdef class Runtime:
 cdef class Object:
     cdef:
         readonly Context context
+        readonly int32_t tag
         JSValue value
         JSContext* ctx
+
 
     cdef void init(self, Context ctx, JSValue value)
     cpdef bytes to_json(self)
@@ -179,12 +179,23 @@ cdef class Context:
         readonly Runtime runtime
         JSRuntime* rt
         JSContext* ctx
+        # incase a hook of some kind with a void happens to throw an exception we can capture it.
+        object _cb_exception
     
-   
-    cdef bint has_exception(self)
-    cdef JSValue get_exception(self)
+
+    # NOTE: I'm Putting type ignores here because
+    # C function "get_exception" is implemented in pxd definition of C class "Context" without the "inline" qualifier
+    # is incorrect. 
+    # inlines are in fact correct even though cyright says otherwise. 
+
+    cdef inline bint has_exception(self): # type: ignore
+        return JS_HasException(self.ctx)
+
+    cdef inline JSValue get_exception(self): # type: ignore
+        return JS_GetException(self.ctx)
+
     cdef object raise_exception(self)
-    cdef object _eval(
+    cdef object ceval(
         self, 
         object code, 
         object filename =*,
@@ -216,7 +227,7 @@ cdef class Context:
         self, 
         object func, 
         object name =*, 
-        # personally IDK how this variable works it's just here if someone knows how to use it...
+        int count=*,
         int magic =* 
     )
 

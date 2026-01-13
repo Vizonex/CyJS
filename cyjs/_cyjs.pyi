@@ -155,7 +155,6 @@ class Context:
         self,
         code: object,
         filename: object = ...,
-        module: bool = ...,
         strict: bool = ...,
         backtrace_barrier: bool = ...,
         promise: bool = ...,
@@ -169,7 +168,8 @@ class Context:
     def json_parse(self, json: object):  # -> object:
         ...
     def get(self, name: object):  # -> object:
-        """Implements a Shortcut for converting a global object to a python object and setting a value to utilize
+        """Implements a Shortcut for converting a global object to a python 
+        object and setting a value to utilize
         off of."""
         ...
 
@@ -187,9 +187,11 @@ class Context:
         :param func: the python function to invoke with 
             quickjs note: that it may not pass along keyword arguments `**kw`
         :param name: an alternative name to give to the function being passed
-        :param magic: the magic value of the js function (Not much is known about it at the moment... defaults to 11 which reflects quickjs's own tests)
+        :param magic: the magic value of the js function (Not much is known about it 
+            at the moment... defaults to 11 which reflects quickjs's own tests)
         """
-        
+    
+
 
 class CancelledError(Exception):
     """Promise was rejected"""

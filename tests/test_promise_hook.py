@@ -50,8 +50,7 @@ class Case:
 
 
 @pytest.fixture(scope="function")
-def setup_ctx() -> tuple[Context, Counter]:
-    rt = Runtime()
+def setup_ctx(rt: Runtime) -> tuple[Context, Counter]:
     ctx = Context(rt)
     counter = Counter()
     rt.set_promise_hook(counter.on_promise)
@@ -76,3 +75,20 @@ def test_hooks(setup_ctx: tuple[Context, Counter], promise_hook: Case):
     ret = ctx.eval_module(promise_hook.code)
     assert isinstance(ret, Promise)
     assert counter.is_equal_to(*promise_hook.expected)
+
+
+def test_bad_hook(rt: Runtime) -> None:
+    # Stress testing bad case scenarios
+    with pytest.raises(TypeError):
+        rt.set_promise_hook(None)
+
+def callback_failure(*args):
+    raise RuntimeError("Jumpscare!")
+
+def test_callback_failure(rt: Runtime) -> None:
+    ctx = Context(rt)
+    rt.set_promise_hook(callback_failure)
+
+    with pytest.raises(RuntimeError):
+        ctx.eval_module("new Promise(() => {})")
+
