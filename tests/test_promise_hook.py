@@ -17,7 +17,11 @@ class Counter:
     resolve: int = 0
 
     def on_promise(
-        self, ctx: Context, hook: PromiseHookType, promise: Promise, parent: object
+        self,
+        ctx: Context,
+        hook: PromiseHookType,
+        promise: Promise,
+        parent: Promise | None,
     ):
         assert isinstance(promise, Promise), "promise was not actually a promise :("
         match hook:
@@ -82,8 +86,10 @@ def test_bad_hook(rt: Runtime) -> None:
     with pytest.raises(TypeError):
         rt.set_promise_hook(None)
 
+
 def callback_failure(*args):
     raise RuntimeError("Jumpscare!")
+
 
 def test_callback_failure(rt: Runtime) -> None:
     ctx = Context(rt)
@@ -91,4 +97,3 @@ def test_callback_failure(rt: Runtime) -> None:
 
     with pytest.raises(RuntimeError):
         ctx.eval_module("new Promise(() => {})")
-

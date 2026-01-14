@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from enum import IntEnum
-from typing import Any, ParamSpec, TypeVar
+from typing import Any, Generic, ParamSpec, TypeVar
 
 _P = ParamSpec("_P")
 _T = TypeVar("_T")
@@ -47,9 +47,6 @@ BEFORE: PromiseHookType = ...
 AFTER: PromiseHookType = ...
 RESOLVE: PromiseHookType = ...
 
-# @cython.internal
-# class PromiseHook: ...
-
 class Runtime:
     def __init__(self) -> None: ...
     def compute_memory_usage(self) -> Any: ...
@@ -67,7 +64,10 @@ class Runtime:
     def set_memory_limit(self, limit: int) -> Any: ...
     def set_max_stack_size(self, max_stack_size: int) -> Any: ...
     def update_statck_top(self) -> Any: ...
-    def set_promise_hook(self, func: object) -> object: ...
+    def set_promise_hook(
+        self,
+        func: Callable[["Context", PromiseHookType, Promise, Promise | None], None],
+    ) -> object: ...
 
 class _OView:
     def __init__(self, obj: Object) -> None: ...
@@ -117,7 +117,7 @@ class Object:
     # equivlent to context.eval_this(self)
     def eval(
         self,
-        code: object,
+        code: str | bytes | bytearray | memoryview,
         filename: object = ...,
         strict: bool = ...,
         backtrace_barrier: bool = ...,
@@ -128,7 +128,7 @@ class Object:
 
     def eval_module(
         self,
-        code: object,
+        code: str | bytes | bytearray | memoryview,
         filename: object = ...,
         strict: bool = ...,
         backtrace_barrier: bool = ...,
@@ -137,10 +137,10 @@ class Object:
         """evaluates javascript module code"""
         ...
 
-class JSFunction(Callable[_P, _T]):
+class JSFunction(Generic[_P, _T]):
     context: Context
 
-    def __call__(self, *args:_P.args, **kwargs:_P.kwargs) -> _T: ...
+    def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _T: ...
     @property
     def object(self) -> Object:
         pass
@@ -164,10 +164,9 @@ class Context:
         dom_exception: bool = ...,
         promise: bool = ...,
     ) -> None: ...
-
     def eval(
         self,
-        code: object,
+        code: str | bytes,
         filename: object = ...,
         strict: bool = ...,
         backtrace_barrier: bool = ...,
@@ -178,7 +177,7 @@ class Context:
 
     def eval_module(
         self,
-        code: object,
+        code: str | bytes,
         filename: object = ...,
         strict: bool = ...,
         backtrace_barrier: bool = ...,
@@ -186,56 +185,53 @@ class Context:
     ) -> object:
         """evaluates javascript module code"""
         ...
-    
 
-    def get_global(self) -> Object:
-        ...
-    def json_parse(self, json: object) -> Object:
-        ...
+    def get_global(self) -> Object: ...
+    def json_parse(self, json: object) -> Object: ...
     def get(self, name: bytes | str) -> Object | Any:
-        """Implements a Shortcut for converting a global object to a python 
+        """Implements a Shortcut for converting a global object to a python
         object and setting a value to utilize
         off of."""
         ...
 
-    def set(self, name: bytes | str, item: object) -> None:
+    def set(
+        self, name: bytes | str, item: object | Object | Promise | JSFunction
+    ) -> None:
         """Sets an item to the current globalThis object"""
         ...
 
     def add_function(
-        self, func: Callable[...], name: str | bytes | None = None, magic: int = 11
-    ) -> JSFunction:
-        """adds a python function to quickjs using 
-        `JS_NewCClosure` since Quickjs-ng doesn't have 
+        self, func: Callable[_P, _T], name: str | bytes | None = None, magic: int = 11
+    ) -> JSFunction[_P, _T]:
+        """adds a python function to quickjs using
+        `JS_NewCClosure` since Quickjs-ng doesn't have
         a good way for bidning python fucntions well yet
-        
-        :param func: the python function to invoke with 
+
+        :param func: the python function to invoke with
             quickjs note: that it may not pass along keyword arguments `**kw`
         :param name: an alternative name to give to the function being passed
-        :param magic: the magic value of the js function (Not much is known about it 
+        :param magic: the magic value of the js function (Not much is known about it
             at the moment... defaults to 11 which reflects quickjs's own tests)
         """
-    
+
     def eval_this(
         self,
-        code: object,
+        code: str | bytes | bytearray | memoryview,
         this: Object | Any,
         filename: object = ...,
         strict: bool = ...,
         backtrace_barrier: bool = ...,
         promise: bool = ...,
-    ) -> Any:...
-
+    ) -> Any: ...
     def eval_this_with_module(
-        self, 
-        code: object,
+        self,
+        code: str | bytes | bytearray | memoryview,
         this: Object | Any,
         filename: object = ...,
         strict: bool = ...,
         backtrace_barrier: bool = ...,
         promise: bool = ...,
-    ) -> Any:...
-
+    ) -> Any: ...
 
 class CancelledError(Exception):
     """Promise was rejected"""
@@ -248,23 +244,21 @@ class InvalidStateError(Exception):
     ...
 
 class Promise(Object):
-    def add_done_callback(self, fn: object) -> object:
+    def add_done_callback(self, fn: Callable[["Promise"], None]) -> object:
         """Attaches a callable callback when promise finishes or raises an exception"""
         ...
 
-    def exception(self) -> object: ...
+    def exception(self) -> BaseException: ...
     def done(self) -> bool: ...
-    def remove_done_callback(self, fn: object) -> int:
+    def remove_done_callback(self, fn: Callable[["Promise"], None]) -> int:
         """Remove all instances of a callback from the "call when done" list.
 
         Returns the number of callbacks removed.
         """
         ...
 
-    def result(self) -> object: ...
-    def poll(self) -> object:
+    def result(self) -> Any: ...
+    def poll(self) -> Any:
         """Polls QuickJS Eventloop a single cycle while attempting
         to wait for this Promise to complete"""
         ...
-
-

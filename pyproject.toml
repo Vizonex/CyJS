@@ -1,7 +1,7 @@
 [project]
 name = "cyjs"
-version = "0.1.0"
-description = "Add your description here"
+dynamic = ["version"]
+description = "A Next Generation QuickJS Intrepreter for cython & python"
 readme = "README.md"
 authors = [
     { name = "Vizonex", email = "VizonexBusiness@gmail.com" }
@@ -21,3 +21,6 @@ requires = ["setuptools", "cython", "wheel"]
 [tool.setuptools]
 zip-safe = false
 packages = ['cyjs']
+
+[tool.setuptools.dynamic]
+version = {attr = "cyjs.__version__"}
