@@ -280,68 +280,90 @@ cdef inline JSValue py_to_js_exception(JSContext* ctx, object obj):
     cyjs_release_buffer(&view)
     return value
 
-# This helps with benchmarking and eliminating a few options when 
-# crunching some move obvious cases...
-ctypedef fused quickjs_type_t:
-    JSFunction
-    Object
-    Exception
-    dict
-    list
-    str
-    int
-    float
-    object
 
 # Returns -1 on failre as a failsafe for C to evacuate safely from
+# TODO: Optimize under this logic -> 
 cdef int to_quickjs(JSContext* ctx, JSValue* val, quickjs_type_t obj) noexcept:
     # Start with the best case scenario
     cdef int overflow = 0
     cdef long ival
 
-    # Important NOTE:
-    # we handle all type checks first this is why we don't do 
-    # elif isintance(obj, str) or PyObject_CheckBuffer(obj):
-    # as we want all fused types to have a clear path if they 
-    # can all be reached the final case (which should be just PyObject*) 
-    # can have PyObject_CheckBuffer(obj) since these aren't clearly explained.
-
-    if isinstance(obj, Object):
+    # NOTE: We optimize by this logic before attempting to perform fallback
+    # https://cython.readthedocs.io/en/latest/src/userguide/fusedtypes.html#type-checking-specializations
+    if quickjs_type_t is Object:
         val[0] = (<Object>obj).value
         return 0
-    elif isinstance(obj, JSFunction):
-        # very quick shortcut
+    elif quickjs_type_t is JSFunction:
         val[0] = (<JSFunction>obj).value
         return 0
 
-    elif isinstance(obj, Exception):
-        # Convert exception
+    elif quickjs_type_t is Exception:
         val[0] = py_to_js_exception(ctx, obj)
         return 0
     
-    elif isinstance(obj, bool):
+    elif quickjs_type_t is dict:
+        return fast_serlize_dict_or_list(ctx, val, obj)
+
+    elif quickjs_type_t is list:
+        return fast_serlize_dict_or_list(ctx, val, obj)
+
+    elif quickjs_type_t is str:
+        return fast_serlize_string(ctx, val, obj)
+    
+    elif quickjs_type_t is int:
+        val[0] = JS_NewInt32(ctx, obj)
+        return 0
+
+    elif quickjs_type_t is bint:
         val[0] = JS_NewBool(ctx, <bint>obj)
         return 0
 
-    elif isinstance(obj, int):
-        ival = PyLong_AsLongAndOverflow(obj, &overflow)
-        if overflow:
-            return fast_parse_json_from_obj(ctx, val, repr(obj))
-        val[0] = JS_NewInt32(ctx, ival)
-        return 0
+    else:
+        # fallback route
+        # Important NOTE:
 
-    elif isinstance(obj, float):
-        val[0] = JS_NewFloat64(ctx, <double>obj)
-        return 0
+        # we handle all type checks first this is why we don't do 
+        # elif isintance(obj, str) or PyObject_CheckBuffer(obj):
+        # as we want all fused types to have a clear path if they 
+        # can all be reached the final case (which should be just PyObject*) 
+        # can have PyObject_CheckBuffer(obj) since these aren't clearly explained.
 
-    elif isinstance(obj, str):
-        return fast_serlize_string(ctx, val, obj)
+        if isinstance(obj, Object):
+            val[0] = (<Object>obj).value
+            return 0
+        elif isinstance(obj, JSFunction):
+            # very quick shortcut
+            val[0] = (<JSFunction>obj).value
+            return 0
 
-    elif isinstance(obj, (dict, list)):
-        return fast_serlize_dict_or_list(ctx, val, obj)
+        elif isinstance(obj, Exception):
+            # Convert exception
+            val[0] = py_to_js_exception(ctx, obj)
+            return 0
 
-    elif PyObject_CheckBuffer(obj):
-        return fast_serlize_string(ctx, val, obj)
+        elif isinstance(obj, bool):
+            val[0] = JS_NewBool(ctx, <bint>obj)
+            return 0
+
+        elif isinstance(obj, int):
+            ival = PyLong_AsLongAndOverflow(obj, &overflow)
+            if overflow:
+                return fast_parse_json_from_obj(ctx, val, repr(obj))
+            val[0] = JS_NewInt32(ctx, ival)
+            return 0
+
+        elif isinstance(obj, float):
+            val[0] = JS_NewFloat64(ctx, <double>obj)
+            return 0
+
+        elif isinstance(obj, str):
+            return fast_serlize_string(ctx, val, obj)
+
+        elif isinstance(obj, (dict, list)):
+            return fast_serlize_dict_or_list(ctx, val, obj)
+
+        elif PyObject_CheckBuffer(obj):
+            return fast_serlize_string(ctx, val, obj)
 
     PyErr_SetObject(TypeError, f"unknown object {type(obj).__name__!r}")
     return -1
@@ -632,6 +654,29 @@ cdef class Object:
     def keys(self):
         return _ObjectKeysView(self)
 
+    # eval_this functions (proxied for the sake of easier access)
+
+    cpdef object eval(
+        self, 
+        object code, 
+        object filename = None,
+        bint strict = False,
+        bint backtrace_barrier = False,
+        bint promise = False
+    ):
+        return self.context.ceval_this(code, self, filename, False, strict, backtrace_barrier, promise)
+
+    cpdef object eval_module(
+        self, 
+        object code, 
+        object filename = None,
+        bint strict = False,
+        bint backtrace_barrier = False,
+        bint promise = False
+    ):
+        return self.context.ceval_this(code, self, filename, True, strict, backtrace_barrier, promise)
+
+
 
 # Will use a closure to gain access to this function since there isn't a reasonable 
 # way to obtain it elsewhere using a INCREF (on creation) and DECREF (on finalization) respectively... 
@@ -792,8 +837,7 @@ cdef class Context: # type: ignore
             raise exc
 
         if JS_HasException(self.ctx):
-            exc = JSError.new(self.ctx, self.get_exception())
-            raise exc
+            raise JSError.new(self.ctx, self.get_exception())
         
     # function setup was inspired by rquickjs's EvalOptions struct
     cdef object ceval(
@@ -975,26 +1019,83 @@ cdef class Context: # type: ignore
         finally:
             cyjs_release_buffer(&view)
         
+    cdef object ceval_this(
+        self, 
+        object code,
+        quickjs_type_t this,
+        object filename = None,
+        bint module = False, 
+        bint strict = False,
+        bint backtrace_barrier = False,
+        bint promise = False
+    ):
+        """evaluates javascript code in from another object"""
+        cdef Py_buffer view, fs_view
+        cdef JSValue val, this_val
+        cdef int flags = 0
+        cdef object fs =  CYJS_FSConvert(filename) if filename else b"<input>"
 
-   
+        if cyjs_get_buffer(code, &view) < 0:
+            raise
+        if cyjs_get_buffer(fs, &fs_view) < 0:
+            cyjs_release_buffer(&view)
+            raise
 
+        flags = JS_EVAL_TYPE_MODULE if module else JS_EVAL_TYPE_GLOBAL
+        if strict:
+            flags |= JS_EVAL_FLAG_STRICT
+        if backtrace_barrier:
+            flags |= JS_EVAL_FLAG_BACKTRACE_BARRIER
+        if promise:
+            flags |= JS_EVAL_FLAG_ASYNC
 
+        if to_quickjs(self.ctx, &this_val, this) < 0:
+            raise
 
+        val = JS_EvalThis(
+            self.ctx,
+            this_val,
+            <const char*>view.buf,
+            <size_t>view.len,
+            <const char*>fs_view.buf,
+            flags
+        )
 
-    
+        cyjs_release_buffer(&view)
+        cyjs_release_buffer(&fs_view)
+        
+        self.raise_exception()
+        
+        return to_python(self.ctx, val)
 
+    cpdef object eval_this(
+        self, 
+        object code,
+        object this,
+        object filename = None,
+        bint strict = False,
+        bint backtrace_barrier = False,
+        bint promise = False
+    ):
+        return self.ceval_this(code, this, filename, False, strict, backtrace_barrier, promise)
 
-
-
-
-
+    cpdef object eval_this_with_module(
+        self, 
+        object code, 
+        object this,
+        object filename = None,
+        bint strict = False,
+        bint backtrace_barrier = False,
+        bint promise = False
+    ):
+        return self.ceval_this(code, this, filename, True, strict, backtrace_barrier, promise)
 
     # TODO: Soon as I figure out how to make callbacks and promises work...
     # Another library called aiojs plans to be worked on work making python's asyncio
     # with quickjs work happily together.
 
     # def promise(self):
-        # JS_NewPromiseCapability(self.ctx, )
+    #     JS_NewPromiseCapability(self.ctx, )
 
 
 cdef int py_to_js_str(JSContext* ctx, object obj, JSValue* value):

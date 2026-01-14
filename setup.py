@@ -34,24 +34,26 @@ EXTRA_COMPILE_ARGS = (
 # Added so that things can compile a bit faster (hopefully)
 EXTRA_IGNORE_COMPILE_ARGS = (
     [
-        "/wd4018", # -Wno-sign-conversion
-        "/wd4061", # -Wno-implicit-fallthrough
-        "/wd4100", # -Wno-unused-parameter
-        "/wd4200", # -Wno-zero-length-array
-        "/wd4242", # -Wno-shorten-64-to-32
-        "/wd4244", # -Wno-shorten-64-to-32
-        "/wd4245", # -Wno-sign-compare
-        "/wd4267", # -Wno-shorten-64-to-32
-        "/wd4388", # -Wno-sign-compare
-        "/wd4389", # -Wno-sign-compare
-        "/wd4456", # Hides previous local declaration
-        "/wd4457", # Hides function parameter
-        "/wd4710", # Function not inlined
-        "/wd4711", # Function was inlined
-        "/wd4820", # Padding added after construct
-        "/wd4996", # -Wdeprecated-declarations
-        "/wd5045" # Compiler will insert Spectre mitigation for memory load if /Qspectre switch specified
-    ] if sys.platform == "win32" else [
+        "/wd4018",  # -Wno-sign-conversion
+        "/wd4061",  # -Wno-implicit-fallthrough
+        "/wd4100",  # -Wno-unused-parameter
+        "/wd4200",  # -Wno-zero-length-array
+        "/wd4242",  # -Wno-shorten-64-to-32
+        "/wd4244",  # -Wno-shorten-64-to-32
+        "/wd4245",  # -Wno-sign-compare
+        "/wd4267",  # -Wno-shorten-64-to-32
+        "/wd4388",  # -Wno-sign-compare
+        "/wd4389",  # -Wno-sign-compare
+        "/wd4456",  # Hides previous local declaration
+        "/wd4457",  # Hides function parameter
+        "/wd4710",  # Function not inlined
+        "/wd4711",  # Function was inlined
+        "/wd4820",  # Padding added after construct
+        "/wd4996",  # -Wdeprecated-declarations
+        "/wd5045",  # Compiler will insert Spectre mitigation for memory load if /Qspectre switch specified
+    ]
+    if sys.platform == "win32"
+    else [
         # IDK How to do all these flags yet but I am reviewing CMakeLists.txt in quickjs for clues...
         "-Wno-implicit-fallthrough",
         "-Wno-sign-compare",
@@ -65,7 +67,6 @@ EXTRA_IGNORE_COMPILE_ARGS = (
 )
 
 EXTRA_COMPILE_ARGS += EXTRA_IGNORE_COMPILE_ARGS
-
 
 
 class quickjs_build_ext(build_ext):

@@ -1,7 +1,9 @@
-import cython
 from collections.abc import Callable
 from enum import IntEnum
-from typing import Any
+from typing import Any, ParamSpec, TypeVar
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
 
 class JSError(Exception):
     """Represents Numerous Exceptions raised from CYJS"""
@@ -45,8 +47,8 @@ BEFORE: PromiseHookType = ...
 AFTER: PromiseHookType = ...
 RESOLVE: PromiseHookType = ...
 
-@cython.internal
-class PromiseHook: ...
+# @cython.internal
+# class PromiseHook: ...
 
 class Runtime:
     def __init__(self) -> None: ...
@@ -112,10 +114,33 @@ class Object:
     def values(self) -> _ObjectValuesView: ...
     def keys(self) -> _ObjectKeysView: ...
 
-class JSFunction(Callable):
+    # equivlent to context.eval_this(self)
+    def eval(
+        self,
+        code: object,
+        filename: object = ...,
+        strict: bool = ...,
+        backtrace_barrier: bool = ...,
+        promise: bool = ...,
+    ) -> object:
+        """evaluates javascript code"""
+        ...
+
+    def eval_module(
+        self,
+        code: object,
+        filename: object = ...,
+        strict: bool = ...,
+        backtrace_barrier: bool = ...,
+        promise: bool = ...,
+    ) -> object:
+        """evaluates javascript module code"""
+        ...
+
+class JSFunction(Callable[_P, _T]):
     context: Context
 
-    def __call__(self, *args, **kwargs) -> Any: ...
+    def __call__(self, *args:_P.args, **kwargs:_P.kwargs) -> _T: ...
     @property
     def object(self) -> Object:
         pass
@@ -163,17 +188,17 @@ class Context:
         ...
     
 
-    def get_global(self):  # -> object:
+    def get_global(self) -> Object:
         ...
-    def json_parse(self, json: object):  # -> object:
+    def json_parse(self, json: object) -> Object:
         ...
-    def get(self, name: object):  # -> object:
+    def get(self, name: bytes | str) -> Object | Any:
         """Implements a Shortcut for converting a global object to a python 
         object and setting a value to utilize
         off of."""
         ...
 
-    def set(self, name: object, item: object):  # -> None:
+    def set(self, name: bytes | str, item: object) -> None:
         """Sets an item to the current globalThis object"""
         ...
 
@@ -191,6 +216,25 @@ class Context:
             at the moment... defaults to 11 which reflects quickjs's own tests)
         """
     
+    def eval_this(
+        self,
+        code: object,
+        this: Object | Any,
+        filename: object = ...,
+        strict: bool = ...,
+        backtrace_barrier: bool = ...,
+        promise: bool = ...,
+    ) -> Any:...
+
+    def eval_this_with_module(
+        self, 
+        code: object,
+        this: Object | Any,
+        filename: object = ...,
+        strict: bool = ...,
+        backtrace_barrier: bool = ...,
+        promise: bool = ...,
+    ) -> Any:...
 
 
 class CancelledError(Exception):
@@ -223,5 +267,4 @@ class Promise(Object):
         to wait for this Promise to complete"""
         ...
 
-@cython.internal
-class NODEFAULT: ...
+

@@ -155,6 +155,25 @@ cdef class Object:
     cdef void init(self, Context ctx, JSValue value)
     cpdef bytes to_json(self)
 
+    cpdef object eval(
+        self, 
+        object code, 
+        object filename =*,
+        bint strict =*,
+        bint backtrace_barrier =*,
+        bint promise =*
+    )
+
+    cpdef object eval_module(
+        self, 
+        object code, 
+        object filename =*,
+        bint strict =*,
+        bint backtrace_barrier =*,
+        bint promise =*
+    )
+
+
 
 cdef class JSFunction:
     """Used for acting as a bridge between Javascript and Python
@@ -171,8 +190,23 @@ cdef class JSFunction:
     @staticmethod
     cdef JSFunction new(Context context, object func)
     cdef JSValue call_js(self, JSContext *ctx, JSValue this_val, int argc, JSValue *argv, int magic) noexcept
-    
 
+
+# This helps with benchmarking and eliminating a few options when 
+# crunching some more obvious cases...
+
+ctypedef fused quickjs_type_t:
+    JSFunction
+    Object
+    Exception
+    dict
+    list
+    str
+    int
+    float
+    object
+    bint
+    
 cdef class Context:
     cdef:
         # public runtime for python access to value (can't be deleted)
@@ -231,9 +265,34 @@ cdef class Context:
         int magic =* 
     )
 
-    # For now it will be represented as an Object
-    # but in the future it can be represented as a 
-    # function the goal of new_function is to call it from
-    # ecma rather than from python itself (should be obvious as to why)
-    # cpdef Object new_function(self, object func, object name=*)
+    cdef object ceval_this(
+        self, 
+        object code,
+        quickjs_type_t this,
+        object filename =*,
+        bint module =*, 
+        bint strict =*,
+        bint backtrace_barrier =*,
+        bint promise =*
+    )
+
+    cpdef object eval_this(
+        self, 
+        object code,
+        object this,
+        object filename =*,
+        bint strict =*,
+        bint backtrace_barrier =*,
+        bint promise =*
+    )
+
+    cpdef object eval_this_with_module(
+        self, 
+        object code, 
+        object this,
+        object filename =*,
+        bint strict =*,
+        bint backtrace_barrier =*,
+        bint promise =*
+    )
 
