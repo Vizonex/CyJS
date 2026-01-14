@@ -1,16 +1,18 @@
 # cython: freethreading_compatible = True
-from .quickjs cimport *
-from cpython.bytes cimport PyBytes_FromStringAndSize
-from cpython.unicode cimport PyUnicode_FromString, PyUnicode_FromStringAndSize
-from cpython.exc cimport PyErr_NoMemory, PyErr_SetObject, PyErr_WriteUnraisable
-from cpython.mem cimport PyMem_Malloc, PyMem_Realloc, PyMem_Free
-from cpython.long cimport PyLong_FromString, PyLong_AsLongAndOverflow
 from cpython.bool cimport PyBool_FromLong
 from cpython.buffer cimport PyObject_CheckBuffer
-from cpython.tuple cimport PyTuple_GET_SIZE
+from cpython.bytes cimport PyBytes_FromStringAndSize
+from cpython.exc cimport (PyErr_CheckSignals, PyErr_NoMemory, PyErr_Occurred,
+                          PyErr_SetObject, PyErr_WriteUnraisable)
 from cpython.list cimport PyList_AsTuple
+from cpython.long cimport PyLong_AsLongAndOverflow, PyLong_FromString
+from cpython.mem cimport PyMem_Free, PyMem_Malloc, PyMem_Realloc
 from cpython.object cimport PyObject_CallObject, PyObject_Str
-from cpython.exc cimport PyErr_CheckSignals, PyErr_Occurred
+from cpython.tuple cimport PyTuple_GET_SIZE
+from cpython.unicode cimport PyUnicode_FromString, PyUnicode_FromStringAndSize
+
+from .quickjs cimport *
+
 
 cdef extern from "Python.h":
     # tweaked signature just a little for our purposes...
@@ -24,7 +26,9 @@ cdef extern from "Python.h":
 cimport cython
 
 # TODO: I'm writing a new cython utils library and a yyjson writer would be a good use-case here...
+
 import json
+
 
 cdef class JSError(Exception):
     """Represents Numerous Exceptions raised from CYJS"""

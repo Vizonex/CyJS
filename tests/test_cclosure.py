@@ -2,9 +2,11 @@ from cyjs._cyjs import Context
 
 import pytest
 
+
 # oldest trick in the book...
-def add(a: int, b:int) -> int:
+def add(a: int, b: int) -> int:
     return a + b
+
 
 # TODO:
 # def peform_raise():
@@ -17,8 +19,10 @@ def test_cclosure_eval(ctx: Context) -> None:
     result = ctx.eval("globalThis.add(1, 2)")
     assert result == 3
 
+
 def throw_exception():
     raise RuntimeError("Boo")
+
 
 def test_function_that_raises_exception(ctx: Context):
     func = ctx.add_function(throw_exception, "py_throw_exception")

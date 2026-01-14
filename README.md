@@ -12,11 +12,92 @@ ECMAScript interpreter for Cython & Python built for
 - Being tiny and easy to use
 - Having ECMA6 Support
 - Having a maintained backend (QuickJS-NG)
-- Being a good companion alongside [selectolax](https://github.com/rushter/selectolax).
+- Being a good companion alongside [selectolax](https://github.com/rushter/selectolax) or beautiful-soup the choice is yours...
+- License friendly, after abandoning pyduktape due to the backend no longer being maintained but also having a pretty poor license all together, It inspired me to try something new for a change that could run newer HTML5 Javascript for any puzzle that is thrown your way.
 
-## NOTE
-The code is still currently under construction as it's taking me a while to brainstorm how to best approch python to js value 
-converstions and vice versa. as well as how `Context` varaibles should work.
+## Quick Example
+
+
+```python
+from cyjs import Context, Runtime
+
+
+def main():
+    # You can also provide a runtime if needed it's usage before making multiple contexts however 
+    # is completely optional
+    rt = Runtime()
+
+    ctx = Context(rt)
+
+    ctx.eval("function add(a, b){ return a + b; }; globalThis.add = add;")
+    add_func = ctx.get_global().get("add")
+
+    # 3 
+    print(add_func(1, 2))
+
+if __name__ == "__main__":
+    main()
+```
+
+Example of use with external html parser tools.
+
+```python
+from cyjs import Context
+from selectolax.lexbor import LexborHTMLParser
+
+# This example demonstates ways of cracking javascript out of webpages
+# with an expernal HTML Parser and cyjs to handle the javascript logic.
+
+# Know that A True HTML5 Dom-API Might require you to make your own 
+# functions and imagination but also reverse engineering the target page.
+
+HTML_PAGE = b"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+<div class="captcha">
+    <script>
+function fake_captcha(name) {
+    return name + "-key";
+}
+    </script>
+    <!-- Use your imagination a little... -->
+</div>
+<div>
+    <script>
+    this.captcha = fake_captcha('123')    
+    </script>
+</div>
+</body>
+</html>
+"""
+
+def main():
+    html = LexborHTMLParser(HTML_PAGE)
+    captcha = html.css_first("div.captcha > script").text(strip=True)
+    
+    fake_solver = Context()
+    fake_solver.eval(captcha + "\nglobalThis.fake_captcha = fake_captcha;")
+    result = fake_solver.get_global().invoke("fake_captcha", "123")
+    # should print
+    # "123-key"
+    print(result)
+
+if __name__ == "__main__":
+    main()
+
+```
+
+There will be more examples in a future update.
+
+
+
+
 
 ## Alternative Python Javascript Interpreters
 
@@ -38,6 +119,8 @@ for eatch to ensure it works correctly. I may be uploading this library to pypi 
 
 - [ ] If anybody finds a smarter approch to anything that has already been written throw me an issue or pull request.
 
+- [ ] Reporting and fixing bugs.
+
 - [ ] JSCFunction I haven't figured out a good solution for this one just yet since I'm trying to limit the number of cdef classes to keep the code small and easy to compile. We need a way to bind an opaque Python Object and trying the old quickjs method seems to trigger crashes (believe me when I say I tried doing that already).
 
 - [ ] JSClass cdef class extension that can be subclassed in python and cython along with the hooks for all the JSClassExoticMethods (we need an approch to passing off a cdef class as an opaque value which I have not figured out how to do yet)
@@ -45,11 +128,4 @@ for eatch to ensure it works correctly. I may be uploading this library to pypi 
     - [ ] JSClassGCMark Hook
     - [ ] A safe approch for handling JSClass to python object conversion and vice versa (if possible)
 
-- [ ] A Way to cancel a Promise Object which could lead to the creation of an __aiojs library__ extension built off this library for quickjs with callbacks from Promise to asyncio.Future while taking cancellation into consideration and adding Python Coroutine Support for quickjs-ng to be able figure out how to handle correctly.
-- [ ] Maybe an easier way to pass off arguments from quickjs to python functions without making the code feel like we are fluking it.
-- [ ] A Way to raise python exceptions from quickjs if possible.
-- [ ] Better typehinting would be a bonus if someone could pull that off.
-- [ ] A couple examples would be nice. If you need inspiration or an example yt-dlp-ejs might be a good freebie.
-- [ ] C Extension Modules from python functions or modules have not been implemented yet due to the same problems as JSCFunction and JSClass being more or less puzzles to bind to python than they need to be.
-- [ ] If anybody can figure out a way to make JS Arrays convert to any Python array or List (Preferrably array.array if the JS Array isn't typed but a list if it is typed) Feel free to figure this out for me.
 
