@@ -43,6 +43,22 @@ cdef extern from "bridge.h":
         bint promise
     )
 
+    # Shortcuts for Making global variables, these are not 
+    # in quickjs's header file but are useful to have here
+    int CYJS_NewGlobalCConstructor2(JSContext *ctx,
+            JSValue func_obj,
+            const char *name,
+            JSValue proto)
+
+    JSValue CYJS_NewGlobalCConstructor(JSContext *ctx, const char *name, JSCFunctionMagic func, int length, JSValue proto, int magic)
+    ctypedef JSValue (*cyjs_get)(JSContext *ctx, JSValue this_val, int magic) noexcept with gil
+    ctypedef JSValue (*cyjs_set)(JSContext *ctx, JSValue this_val, JSValue value, int magic ) noexcept with gil
+    JSCFunctionListEntry* CYJS_MakeJSCFunctionListEntries(
+        list names,
+        cyjs_get get,
+        cyjs_set set
+    ) except NULL
+
 cdef class JSError(Exception):
     @staticmethod
     cdef JSError new(JSContext* ctx, JSValue value)
@@ -102,7 +118,7 @@ cdef class PromiseHook:
         
 
 
-    
+
 
 cdef class Runtime:
     """
@@ -141,8 +157,13 @@ cdef class Runtime:
     cpdef void update_statck_top(self)
 
     cpdef object set_promise_hook(self, object func)
-
-
+    cpdef JSClass new_class(
+        self,
+        object py_type,
+        object name =*,
+        object attrs=*
+    )
+    
 
 cdef class Object:
     cdef:
@@ -192,11 +213,53 @@ cdef class JSFunction:
     cdef JSValue call_js(self, JSContext *ctx, JSValue this_val, int argc, JSValue *argv, int magic) noexcept
 
 
+# Inspired by pyduktape
+cdef class JSRef:
+    """Used for acting as a bridge between Javascript and Python attributes"""
+    cdef:
+        readonly Context context
+        JSContext* ctx
+        JSValue value
+        object ref
+        list slots # list of exposable attributes to chain to JS_CGETSET_MAGIC_DEF
+
+
+    @staticmethod
+    cdef JSRef new(Context context, JSValue value, object ref, list slots)
+
+    # cdef int has(self, JSAtom at) except -1
+    # cdef JSValue get(self, JSAtom at)
+
+
+cdef class JSClass:
+    """Enables Class Creation (Mostly internal)"""
+    cdef:
+        readonly Runtime runtime
+        readonly JSClassID id # expose to python for debugging
+        object py_type
+        JSClassDef cls_def
+        list properties
+        JSCFunctionListEntry* entries
+
+    @staticmethod
+    cdef JSClass new(
+        Runtime runtime,
+        object py_type,
+        object class_name=*,
+        list properties=*
+    )
+
+
+
+
+
+
 # This helps with benchmarking and eliminating a few options when 
 # crunching some more obvious cases...
 
 ctypedef fused quickjs_type_t:
     JSFunction
+    JSRef
     Object
     Exception
     dict
@@ -215,7 +278,11 @@ cdef class Context:
         JSContext* ctx
         # incase a hook of some kind with a void happens to throw an exception we can capture it.
         object _cb_exception
-    
+        # This will allow us to attempt to safely hook JSClassIDs to Python classes.
+        dict _pyjs_classes
+        # helps with figuring out if a type can be safely JSRef'd
+        set _registered_py_types
+        
 
     # NOTE: I'm Putting type ignores here because
     # C function "get_exception" is implemented in pxd definition of C class "Context" without the "inline" qualifier
@@ -294,5 +361,12 @@ cdef class Context:
         bint strict =*,
         bint backtrace_barrier =*,
         bint promise =*
+    )
+
+    # Wraps functions and registers JSClass 
+    # to start performing conversions with it.
+    cpdef object add_class(
+        self,
+        JSClass js_cls
     )
 

@@ -7,8 +7,10 @@ from cpython.exc cimport (PyErr_CheckSignals, PyErr_NoMemory, PyErr_Occurred,
 from cpython.list cimport PyList_AsTuple
 from cpython.long cimport PyLong_AsLongAndOverflow, PyLong_FromString
 from cpython.mem cimport PyMem_Free, PyMem_Malloc, PyMem_Realloc
-from cpython.object cimport PyObject_CallObject, PyObject_Str
+from cpython.object cimport PyObject_CallObject, PyObject_Str, Py_TYPE, PyObject_GetAttr, PyObject_SetAttr, PyObject_HasAttrString
+from cpython.list cimport PyList_GET_SIZE
 from cpython.tuple cimport PyTuple_GET_SIZE
+from cpython.type cimport PyType_Check
 from cpython.unicode cimport PyUnicode_FromString, PyUnicode_FromStringAndSize
 
 from .quickjs cimport *
@@ -20,6 +22,8 @@ cdef extern from "Python.h":
     # hacky REFs to not need a linked list setup like with the old quickjs library
     void Py_XDECREF(object)
     void Py_XINCREF(object)
+    object PyList_GET_ITEM(object p, Py_ssize_t pos)
+
 
 
 
@@ -198,6 +202,26 @@ cdef class Runtime:
         self.has_promise_hook = True
         JS_SetPromiseHook(self.rt, on_promise_hook, <void*>self.promise_hook)
 
+    cpdef JSClass new_class(
+        self,
+        object py_type,
+        object name = None,
+        object attrs = []
+    ):
+        """Registers a python class to bind with quickjs
+        :param py_type: the python type to bind with.
+        :param name: an alternative name to provide \
+            to the given type object. The Default name \
+            will get derrived from py_type if name is None.
+        :param attrs: an iterable of readable public properties 
+            that this class should allow quickjs to be able to have access to and read. NOTE: class methods
+            haven't been implemented yet but might be planned
+            in a future update...
+        """
+        if not PyType_Check(py_type):
+            raise TypeError("py_type must be a type object.")
+        return JSClass.new(self, py_type, name, list(attrs))
+
 
     def __dealloc__(self):
         if self.rt != NULL:
@@ -297,6 +321,9 @@ cdef int to_quickjs(JSContext* ctx, JSValue* val, quickjs_type_t obj) noexcept:
     if quickjs_type_t is Object:
         val[0] = (<Object>obj).value
         return 0
+    elif quickjs_type_t is JSRef:
+        val[0] = (<JSRef>obj).value
+        return 0
     elif quickjs_type_t is JSFunction:
         val[0] = (<JSFunction>obj).value
         return 0
@@ -339,7 +366,11 @@ cdef int to_quickjs(JSContext* ctx, JSValue* val, quickjs_type_t obj) noexcept:
             # very quick shortcut
             val[0] = (<JSFunction>obj).value
             return 0
-
+        
+        elif isinstance(obj, JSRef):
+            val[0] = (<JSRef>obj).value
+            return 0
+        
         elif isinstance(obj, Exception):
             # Convert exception
             val[0] = py_to_js_exception(ctx, obj)
@@ -757,7 +788,239 @@ cdef class JSFunction:
 
 
 
+cdef class JSRef:
+    """Used for acting as a bridge between Javascript and Python attributes"""
+    
+    @staticmethod
+    cdef JSRef new(Context context, JSValue value, object ref, list slots):
+        cdef JSRef self = JSRef.__new__(JSRef)
+        self.context = context
+        # faster shortcut
+        self.ctx = context.ctx
+        self.value = value
+        self.ref = ref
+        # Let Opaque value dictate how we perform closure...
+        Py_XINCREF(self)
+        JS_SetOpaque(self.value, <void*>self)
+        self.slots = slots
+        return self
+
+    def __dealloc__(self):
+        JS_FreeValue(self.context.ctx, self.value)
+
+    # cdef int has(self, JSAtom at) except -1:
+    #     cdef const char* cstr = JS_AtomToCString(self.context.ctx, at)
+    #     try: 
+    #         return PyObject_HasAttrString(self.ref, cstr)
+    #     finally:
+    #         JS_FreeCString(self.context.ctx, cstr)
+    
+    # cdef JSValue get(self, JSAtom at):
+    #     cdef const char* cstr = JS_AtomToCString(self.context.ctx, at)
+    #     cdef JSValue attr
+    #     try: 
+    #         if to_quickjs(self.ctx, &attr, PyObject_GetAttrString(
+    #             self.ref,  cstr)) < 0:
+    #             return JS_EXCEPTION
+    #         return attr
+    #     except BaseException as e:
+    #         self.context._cb_exception = e
+    #         return JS_EXCEPTION
+    #     finally:
+    #         JS_FreeCString(self.context.ctx, cstr)
+    
+    # cdef JSValue set(self, JSAtom at, ):
+    #     cdef const char* cstr = JS_AtomToCString(self.context.ctx, at)
+    #     cdef JSValue attr
+    #     try: 
+    #         if to_quickjs(self.ctx, &attr, PyObject_GetAttrString(
+    #             self.ref,  cstr)) < 0:
+    #             return JS_EXCEPTION
+    #         return attr
+    #     except BaseException as e:
+    #         self.context._cb_exception = e
+    #         return JS_EXCEPTION
+    #     finally:
+    #         JS_FreeCString(self.context.ctx, cstr)
         
+
+
+
+
+
+
+cdef inline JSRef get_jsref(JSValue value):
+    cdef JSClassID temp = 0
+    return (<JSRef>JS_GetAnyOpaque(value, &temp))
+
+# JSRef acts as a proxy of it's own creation this is to cheat
+# a few things and allow for lazy development of python types...
+
+
+
+
+
+cdef void js_class_finalizer(JSRuntime* rt, JSValue value) noexcept with gil:
+    cdef JSRef ref = get_jsref(value)
+    Py_XDECREF(ref)
+
+cdef JSValue jsref_get(JSContext *ctx, JSValue this_val, int magic) noexcept with gil:
+    cdef JSRef ref = get_jsref(this_val)
+    cdef object ret
+    cdef JSValue val
+    try:
+        ret = PyObject_GetAttr(ref.ref, PyList_GET_ITEM(ref.slots, magic))
+        if to_quickjs(ctx, &val, ret) < 0:
+            return JS_EXCEPTION
+        return val
+    except BaseException as e:
+        # Special Shortcut...
+        ref.context._cb_exception = e
+        return JS_EXCEPTION
+
+cdef JSValue jsref_set(JSContext *ctx, JSValue this_val, JSValue val, int magic) noexcept with gil:
+    cdef JSRef ref = get_jsref(this_val)
+    cdef object ret
+    try:
+        ret = to_python(ctx, val)
+        if PyObject_SetAttr(ref.ref, PyList_GET_ITEM(ref.slots, magic), ret) < 0:
+            return JS_EXCEPTION
+        return JS_UNDEFINED
+    except BaseException as e:
+        # Special Shortcut...
+        ref.context._cb_exception = e
+        return JS_EXCEPTION
+    
+
+    # ctypedef JSValue (*cyjs_set)(JSContext *ctx, JSValue this_val, JSValue value, int magic )
+
+
+cdef class JSClass:
+    """Enables Class Creation (Mostly internal)"""
+    @staticmethod
+    cdef JSClass new(
+        Runtime runtime,
+        object py_type,
+        object class_name = None,
+        # NOTE: while enabling all items of a class to be
+        # exposed would be nice. There can also be security 
+        # concerns with that so having it be user provided is a 
+        # safer feature over all...
+        # list of attributes to expose to javascript
+        list properties = []
+    ):
+        cdef object name
+        cdef Py_buffer view
+        cdef JSClass self = JSClass.__new__(JSClass)
+        
+        name = class_name or py_type.__name__
+        self.runtime = runtime
+        self.id = 0
+        self.py_type = py_type
+
+        JS_NewClassID(runtime.rt, &self.id)
+        
+        if cyjs_get_buffer(name, &view) < 0:
+            raise
+
+        self.cls_def.finalizer
+        self.cls_def.class_name = <const char*>view.buf
+        
+        if JS_NewClass(runtime.rt, self.id, &self.cls_def) < 0:
+            raise
+
+        cyjs_release_buffer(&view)
+
+        self.properties = properties
+        if properties:
+            self.entries = CYJS_MakeJSCFunctionListEntries(
+                properties,
+                jsref_get,
+                jsref_set
+            )
+            
+        else:
+            self.entries = NULL
+
+        return self
+
+    @property
+    def type(self):
+        """returns the original type provided to be binded to quickjs"""
+        return self.py_type
+
+    @property
+    def name(self):
+        """provides the name of the given JSClass through it's JSClassDef structure"""
+        return PyUnicode_FromString(self.cls_def.class_name)
+    
+    def __dealloc__(self):
+        if self.entries != NULL:
+            PyMem_Free(self.entries)
+
+    
+
+
+
+        
+        
+
+
+    
+ 
+
+
+        
+
+
+
+cdef JSValue pyjs_constructor(JSContext* ctx, JSValue new_target, int argc, JSValue* argv, int magic) noexcept with gil:
+    # We need to retrace our object back for recovery of the ClassID
+    # Since our objects are dynamic and not what the Quickjs devs had intended 
+    # it's purpose to be since were attempting to allow newly dynamic python classes
+    # and structures to be allowed through the system...
+    cdef Context context = <Context>JS_GetContextOpaque(ctx)
+    cdef JSClass js_cls
+    cdef JSValue obj, proto
+    cdef arg_parser_t parser
+    cdef object opaque
+    cdef JSRef js_ref
+    arg_parser_init(&parser, ctx, argv, argc, argc)
+
+    try:
+        js_cls = <JSClass>context._pyjs_classes[magic]
+        opaque = PyObject_CallObject(js_cls.py_type, arg_parser_unpack(&parser))
+        proto = JS_GetPropertyStr(ctx, new_target, "prototype")
+        if JS_IsException(proto):
+            return JS_EXCEPTION
+        # allow subclassing the python class
+        obj = JS_NewObjectProtoClass(
+            ctx, 
+            proto,
+            js_cls.id
+        )
+        if JS_IsException(obj):
+            return JS_EXCEPTION
+        js_ref = JSRef.new(context, obj, opaque, js_cls.properties)
+        return js_ref.value
+    except BaseException as e:
+        context._cb_exception = e
+        JS_FreeValue(ctx, obj)
+        return JS_EXCEPTION
+    finally:
+        arg_parser_finish(&parser)
+
+
+
+
+
+
+    
+    
+
+
+
+
 
 
 # cdef class InterruptHandler:
@@ -818,7 +1081,9 @@ cdef class Context: # type: ignore
         self.runtime = runtime
         # Collection exception if seen in a void callback
         self._cb_exception = None
-  
+        self._pyjs_classes = {}
+        self._registered_py_types = set()
+
 
     # Inlined 
     # cdef bint has_exception(self):
@@ -1022,7 +1287,11 @@ cdef class Context: # type: ignore
         
         finally:
             cyjs_release_buffer(&view)
-        
+
+
+
+
+
     cdef object ceval_this(
         self, 
         object code,
@@ -1093,6 +1362,56 @@ cdef class Context: # type: ignore
         bint promise = False
     ):
         return self.ceval_this(code, this, filename, True, strict, backtrace_barrier, promise)
+
+    
+    cpdef object add_class(
+        self,
+        JSClass js_cls
+    ):
+        """
+        binds a JSClass Globally
+        :param js_cls: the Javascript Class to bind, 
+            these can be created via obtaining the runtime attribute of this context 
+            as a shortcut and calling runtime.new_class(...)
+        """
+        cdef JSValue js_cls_proto, obj
+        
+        self._pyjs_classes[js_cls.id] = js_cls
+        # for to_quickjs conversions (object route)
+        self._registered_py_types.add(js_cls.py_type)
+
+        js_cls_proto = JS_NewObjectClass(self.ctx, js_cls.id)
+        if JS_IsException(js_cls_proto):
+            self.raise_exception()
+            raise
+        
+        obj = CYJS_NewGlobalCConstructor(
+            self.ctx, 
+            js_cls.cls_def.class_name,
+            pyjs_constructor,
+            1,
+            js_cls_proto,
+            # Needed otherwise chaining and stuff doesn't work...
+            js_cls.id
+        )
+
+       
+        if js_cls.entries != NULL:
+            if JS_SetPropertyFunctionList(self.ctx, js_cls_proto, js_cls.entries, <int>PyList_GET_SIZE(js_cls.properties)) < 0:
+                self.raise_exception()
+                raise
+            
+        # TODO: JS_SetPropertyFunctionList... Might need a custom macro to make it...
+    
+        # Handle Object since we added safety mechanisms to our version of 
+        # JS_NewGlobalCConstructor to ensure that we are 100% safe.
+        if JS_IsException(obj):
+            self.raise_exception()
+            raise
+
+        return to_python(self.ctx, obj)
+
+
 
     # TODO: Soon as I figure out how to make callbacks and promises work...
     # Another library called aiojs plans to be worked on work making python's asyncio
@@ -1258,10 +1577,17 @@ cdef Promise jsv_to_promise(JSContext* ctx, JSValue value):
     v.completed = False
     return v
 
+cdef inline bint is_registerd_jsref(JSContext* ctx, JSValue value):
+    cdef Context context = <Context>JS_GetContextOpaque(ctx)
+    return JS_GetClassID(value) in context._pyjs_classes
+
+cdef inline object get_jsref_python_type(JSValue value):
+    return get_jsref(value).ref
 
 cdef object to_python(JSContext* ctx, JSValue value):
     cdef int32_t tag = JS_VALUE_GET_TAG(value)
     cdef object ret
+    
 
     if tag == JS_TAG_EXCEPTION:
         (<Context>JS_GetContextOpaque(ctx)).raise_exception()
@@ -1269,6 +1595,8 @@ cdef object to_python(JSContext* ctx, JSValue value):
 
 
     elif tag == JS_TAG_MODULE or tag == JS_TAG_OBJECT or tag == JS_TAG_SYMBOL:
+        if is_registerd_jsref(ctx, value):
+            return get_jsref_python_type(value)
         if JS_IsPromise(value):
             return jsv_to_promise(ctx, value)
         return jsv_to_object(ctx, value)

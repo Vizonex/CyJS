@@ -1,7 +1,8 @@
-from cyjs import PromiseHookType, Context, Runtime, Promise
 from dataclasses import dataclass
+
 import pytest
 
+from cyjs import Context, Promise, PromiseHookType, Runtime
 
 # Reflects test api-test.c
 # void promise_hook(void) Line: 523 - 661

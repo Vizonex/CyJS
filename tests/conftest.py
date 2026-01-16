@@ -1,6 +1,6 @@
-from cyjs._cyjs import Context, Runtime
-
 import pytest
+
+from cyjs._cyjs import Context, Runtime
 
 
 @pytest.fixture()

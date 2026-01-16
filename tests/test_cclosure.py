@@ -1,6 +1,6 @@
-from cyjs._cyjs import Context
-
 import pytest
+
+from cyjs._cyjs import Context
 
 
 # oldest trick in the book...

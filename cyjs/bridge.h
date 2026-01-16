@@ -298,28 +298,90 @@ cyjs_release_buffer(Py_buffer *view) {
 
 
 
+// these functions are private in Quickjs but can prove useful when needing to expose a class object globally,
+// Extremely good if your needing to mimic something like HTML5 Javascript for instance...
+// These are slightly modified so we can proxy through python objects without problems.
+// But also require strict exception handling incase anything bad happens that we didn't take into account.
+static int CYJS_NewGlobalCConstructor2(JSContext *ctx,
+                                      JSValue func_obj,
+                                      const char *name,
+                                      JSValueConst proto)
+{
+    JSValue global_obj = JS_GetGlobalObject(ctx);
 
-/// @brief Initalizes JSClassDef with help from a PyObject
-/// @param obj The Python Object/Class or Cython C Extension object to intialize
-/// @param cls The JSClass Definition
-/// @param finalizer Optional Callback
-/// @param gc_mark Optional Callback
-/// @param call Optional Callback
-// void CYJS_CreateJSClassDef(
-//     PyObject* obj, 
-//     JSClassDef* cls, 
-//     JSClassFinalizer *finalizer,
-//     JSClassGCMark* gc_mark,
-//     JSClassCall* call,
-// ){
-//     /* XXX: Cython is not very capable of this but is perfectly acceptable in C... */
-//     cls->class_name = Py_TYPE(obj)->tp_name;
-//     cls->finalizer = finalizer;
-//     cls->gc_mark = gc_mark;
-//     cls->call = call;
+    if (JS_DefinePropertyValueStr(ctx, global_obj, name,
+                              JS_DupValue(ctx, func_obj),
+                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE) < 0){
+        return -1;
+    };
 
-// }
+    JS_SetConstructor(ctx, func_obj, proto);
+    JS_FreeValue(ctx, func_obj);
+    return 0;
+}
 
+static JSValue CYJS_NewGlobalCConstructor(JSContext *ctx, const char *name,
+                                        JSCFunctionMagic *func, int length,
+                                        JSValueConst proto, int magic)
+{
+    JSValue func_obj;
+    func_obj = JS_NewCFunctionMagic(ctx, func, name, length, JS_CFUNC_constructor_or_func_magic, magic);
+    if (CYJS_NewGlobalCConstructor2(ctx, func_obj, name, proto) < 0){
+        JS_FreeValue(ctx, func_obj);
+        return JS_EXCEPTION;
+    }
+    return func_obj;
+}
+
+static JSValue CYJS_NewGlobalCConstructorOnly(JSContext *ctx, const char *name,
+                                            JSCFunctionMagic *func, int length,
+                                            JSValue proto, int magic)
+{
+    JSValue func_obj;
+    func_obj = JS_NewCFunctionMagic(ctx, func, name, length, JS_CFUNC_constructor_magic, magic);
+    if (CYJS_NewGlobalCConstructor2(ctx, func_obj, name, proto) < 0){
+        JS_FreeValue(ctx, func_obj);
+        return JS_EXCEPTION;
+    }
+    return func_obj;
+}
+
+typedef JSValue (*cyjs_get)(JSContext *ctx, JSValue this_val, int magic);
+typedef JSValue (*cyjs_set)(JSContext *ctx, JSValue this_val, JSValue value, int magic);
+
+static JSCFunctionListEntry* CYJS_MakeJSCFunctionListEntries(
+    PyObject* names,
+    cyjs_get get,
+    cyjs_set set
+){
+    Py_buffer view;
+    Py_ssize_t size = PyList_GET_SIZE(names);
+    JSCFunctionListEntry* entries = PyMem_Malloc(sizeof(JSCFunctionListEntry) * size);
+    JSCFunctionListEntry e;
+    if (entries == NULL){
+        PyErr_NoMemory();
+        return NULL;
+    }
+
+    for (Py_ssize_t i = 0; i < size; i++){
+        PyObject* obj = PyList_GET_ITEM(names, i);
+        if (cyjs_get_buffer(obj, &view) < 0){
+            PyMem_Free(entries);
+            return NULL;
+        }
+        /* let magic dictate what slot is given 
+        we also need to expand macro due to C++ 
+        being mean with us... */
+        entries[i].name = view.buf; 
+        entries[i].prop_flags = JS_PROP_CONFIGURABLE; 
+        entries[i].def_type = JS_DEF_CGETSET_MAGIC; 
+        entries[i].magic = (int16_t)i;
+        entries[i].u.getset.get.getter_magic = get;
+        entries[i].u.getset.set.setter_magic = set;
+        cyjs_release_buffer(&view);
+    }
+    return entries;
+};
 
 #ifdef __cplusplus
 }

@@ -28,8 +28,8 @@ cdef extern from "quickjs.h" nogil:
         JS_TAG_SHORT_BIG_INT = 7
         JS_TAG_FLOAT64 = 8
 
-    ctypedef struct JSClass:
-        pass
+    # ctypedef struct JSClass:
+    #     pass
     ctypedef struct JSModuleDef:
         pass
     ctypedef struct JSGCObjectHeader:
@@ -195,7 +195,7 @@ cdef extern from "quickjs.h" nogil:
         int (*has_property)(JSContext*, JSValue, JSAtom)
         JSValue (*get_property)(JSContext*, JSValue, JSAtom, JSValue)
         int (*set_property)(JSContext*, JSValue, JSAtom, JSValue, JSValue, int)
-    
+ 
     ctypedef void (*JSClassFinalizer)(JSRuntime*, JSValue) noexcept with gil
     ctypedef void (*JSClassGCMark)(JSRuntime*, JSValue, JS_MarkFunc*) noexcept with gil
     ctypedef JSValue (*JSClassCall)(JSContext*, JSValue, JSValue, int, JSValue*, int) noexcept with gil
@@ -358,6 +358,8 @@ cdef extern from "quickjs.h" nogil:
     void* JS_GetAnyOpaque(JSValue, JSClassID*)
     JSValue JS_ParseJSON(JSContext*, const char*, size_t, const char*)
     JSValue JS_UNDEFINED
+    JSValue JS_EXCEPTION
+
     JSValue JS_JSONStringify(JSContext*, JSValue, JSValue, JSValue)
     ctypedef void (*JSFreeArrayBufferDataFunc)(JSRuntime*, void*, void*)
     JSValue JS_NewArrayBuffer(JSContext*, uint8_t*, size_t, JSFreeArrayBufferDataFunc*, void*, bint)
@@ -475,8 +477,8 @@ cdef extern from "quickjs.h" nogil:
     JSValue JS_NewCFunctionData2(JSContext*, JSCFunctionData*, const char*, int, int, int, JSValue*)
     ctypedef void (*JSCClosureFinalizerFunc)(void*) noexcept with gil
     JSValue JS_NewCClosure(JSContext*, JSCClosure, const char*, JSCClosureFinalizerFunc, int, int, void*)
-    JSValue JS_NewCFunction(JSContext*, JSCFunction*, const char*, int)
-    JSValue JS_NewCFunctionMagic(JSContext*, JSCFunctionMagic*, const char*, int, JSCFunctionEnum, int)
+    JSValue JS_NewCFunction(JSContext*, JSCFunction, const char*, int)
+    JSValue JS_NewCFunctionMagic(JSContext*, JSCFunctionMagic, const char*, int, JSCFunctionEnum, int)
     void JS_SetConstructor(JSContext*, JSValue, JSValue)
     struct pxdgen_anon_pxdgen_anon_JSCFunctionListEntry_0_0:
         JSCFunctionListEntry* tab
@@ -556,3 +558,6 @@ cdef extern from "quickjs.h" nogil:
     int JS_PROP_NORMAL
     int JS_PROP_GETSET
 
+    
+    
+    

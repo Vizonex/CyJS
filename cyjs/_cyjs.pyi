@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from enum import IntEnum
 from typing import Any, Generic, ParamSpec, TypeVar
 
@@ -68,6 +68,24 @@ class Runtime:
         self,
         func: Callable[["Context", PromiseHookType, Promise, Promise | None], None],
     ) -> object: ...
+    def new_class(
+        self,
+        py_type: type[_T],
+        name: str | bytes | bytearray | memoryview = ...,
+        attrs: Iterable[str] = ...,
+    ) -> JSClass[_T]:
+        """Registers a python class to bind with quickjs
+
+        :param py_type: the python type to bind with.
+        :param name: an alternative name to provide \
+            to the given type object. The Default name \
+            will get derrived from py_type if name is None.
+        :param attrs: an iterable of readable public properties \
+            that this class should allow quickjs to be able to have \
+            access to and read. \
+                NOTE: functions and methods haven't been implemented yet \
+                    but might be planned in a future update.
+        """
 
 class _OView:
     def __init__(self, obj: Object) -> None: ...
@@ -137,6 +155,8 @@ class Object:
         """evaluates javascript module code"""
         ...
 
+# TODO: Provide Generic typehinting capabilites in the actual cython code.
+# Like how frozenlist does it or through a simillar mechanism...
 class JSFunction(Generic[_P, _T]):
     context: Context
 
@@ -145,7 +165,19 @@ class JSFunction(Generic[_P, _T]):
     def object(self) -> Object:
         pass
 
+class JSClass(Generic[_T]):
+    runtime: Runtime
+    id: int
+
+    @property
+    def type(self) -> type[_T]:
+        """returns the original type provided to be binded to quickjs"""
+    @property
+    def name(self) -> str:
+        """provides the name of the given JSClass through it's JSClassDef structure"""
+
 class Context:
+    runtime: Runtime
     def __init__(
         self,
         runtime: Runtime = ...,
@@ -232,6 +264,14 @@ class Context:
         backtrace_barrier: bool = ...,
         promise: bool = ...,
     ) -> Any: ...
+    def add_class(self, js_cls: JSClass[Any]):
+        """
+        binds a JSClass Globally to globalThis
+        :param js_cls: the Javascript Class to bind \
+            these can be created via obtaining the runtime \
+            attribute of this context \
+            as a shortcut and calling `runtime.new_class(...)` beforehand
+        """
 
 class CancelledError(Exception):
     """Promise was rejected"""
