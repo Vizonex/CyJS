@@ -1,4 +1,4 @@
 # Will need test.txt if we want to run some tests
 -r test.txt
 cython==3.2.4
-setuptools==80.10.1
+setuptools==80.10.2
